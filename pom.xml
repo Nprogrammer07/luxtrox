@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.luxtrox</groupId>
+    <artifactId>luxtrox-backend</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>LUXTROX ALGORITMO - Backend</name>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <flyway.version>10.20.1</flyway.version>
+    </properties>
+
+    <!--
+        NOTA Fase 3: este pom.xml es deliberadamente minimo, solo lo
+        necesario para que Flyway pueda correr las migraciones contra
+        Supabase. En la Fase 4 (Spring Boot Core) se AGREGAN las
+        dependencias de spring-boot-starter-* a este mismo archivo, no
+        se reemplaza.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>${flyway.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <version>${flyway.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-maven-plugin</artifactId>
+                <version>${flyway.version}</version>
+                <!--
+                    Credenciales NUNCA en este archivo. Se pasan por
+                    linea de comandos o variables de entorno, ej.:
+
+                    mvn flyway:migrate \
+                      -Dflyway.url="jdbc:postgresql://<host-supabase>:5432/postgres" \
+                      -Dflyway.user="postgres" \
+                      -Dflyway.password="<password-supabase>"
+
+                    Ver docs/supabase-setup.md para el flujo completo.
+                -->
+                <configuration>
+                    <locations>
+                        <location>filesystem:src/main/resources/db/migration</location>
+                    </locations>
+                    <configFiles>
+                        <configFile>flyway.conf</configFile>
+                    </configFiles>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.postgresql</groupId>
+                        <artifactId>postgresql</artifactId>
+                        <version>42.7.4</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+    </build>
+</project>
