@@ -9,6 +9,8 @@ release.properties
 flyway.conf
 .env
 *.env.local
+application-local.yml
+application-local.yaml
 
 # IDE
 .idea/

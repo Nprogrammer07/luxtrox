@@ -10,7 +10,7 @@ durante la migración.
 
 El formato es:
 ```
-postgresql://postgres.<tu-proyecto-ref>:[PASSWORD]@aws-0-<región>.pooler.supabase.com:5432/postgres
+jdbc:postgresql://db.<tu-proyecto-ref>.supabase.co:5432/postgres
 ```
 
 Usuario: `postgres`
