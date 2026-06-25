@@ -10,4 +10,11 @@ import java.util.UUID;
 public interface PurchaseRepository extends JpaRepository<Purchase, UUID> {
     List<Purchase> findByUser(User user);
     List<Purchase> findByStatus(PurchaseStatus status);
+
+    /**
+     * Elegibilidad para ganar comisiones de referido (ver
+     * docs/domain-model.md 7.2): cualquier compra CONFIRMADA, sin
+     * importar el plan (Driver o Zenith).
+     */
+    boolean existsByUserAndStatus(User user, PurchaseStatus status);
 }

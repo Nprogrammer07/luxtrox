@@ -2,6 +2,7 @@ package com.luxtrox.backend.repository;
 
 import com.luxtrox.backend.entity.*;
 import com.luxtrox.backend.entity.enums.PaymentMethod;
+import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PositionStatus;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,7 @@ class InvestmentPositionRepositoryTest extends AbstractIntegrationTest {
     private InvestmentPosition createPosition(User user, BigDecimal cashbackPaid, BigDecimal cashbackRemaining,
                                                 PositionStatus status, OffsetDateTime createdAt) {
         Purchase purchase = purchaseRepository.save(
-                new Purchase(user, 1, new BigDecimal("1100.00"), PaymentMethod.CRYPTO));
+                new Purchase(user, PlanType.DRIVER, 1, new BigDecimal("1100.00"), PaymentMethod.CRYPTO));
 
         InvestmentPosition position = new InvestmentPosition(
                 user, purchase, new BigDecimal("1100.00"), new BigDecimal("3300.00"));

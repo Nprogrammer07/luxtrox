@@ -80,15 +80,16 @@ Tabla separada (no enum) — decisión explícita para permitir agregar roles en
 |---|---|---|
 | id | UUID (PK) | |
 | userId | FK → User | |
-| packageQuantity | INT | 1–30 |
-| totalAmount | DECIMAL(14,2) | `packageQuantity × 1100` |
+| planType | ENUM | `DRIVER`, `ZENITH` — agregado en §7.1 |
+| packageQuantity | INT | 1–30, **solo aplica a DRIVER** (Zenith siempre es 1) |
+| totalAmount | DECIMAL(14,2) | Driver: `packageQuantity × 1099`. Zenith: `2299` fijo (ver §7.1, precio de Driver corregido de 1100 a 1099) |
 | paymentMethod | ENUM | `CRYPTO`, `ALTERNATIVE` |
 | status | ENUM | `PENDING`, `CONFIRMED`, `REJECTED`, `EXPIRED` |
-| positionId | FK → InvestmentPosition, NULLABLE | se rellena al confirmar |
+| positionId | FK → InvestmentPosition, NULLABLE | se rellena al confirmar — **solo si planType = DRIVER**; Zenith nunca tiene posición |
 | createdAt | TIMESTAMP | |
 | confirmedAt | TIMESTAMP, NULLABLE | |
 
-**Validación al crear:** `user.totalPackagesPurchased + packageQuantity <= 30`. *(`[SUPUESTO 1]`: el tope de 30 paquetes / 33.000 USD es **acumulado por usuario a lo largo del tiempo**, no por compra individual — se infiere de que el frontend ya existente usa `maxSeminars: 30` como tope total del usuario. Confirmar.)*
+**Validación al crear (solo DRIVER):** `user.totalPackagesPurchased + packageQuantity <= 30`. *(`[SUPUESTO 1]`: el tope de 30 paquetes / 33.000 USD es **acumulado por usuario a lo largo del tiempo**, no por compra individual — confirmado por el cliente. No aplica a Zenith.)*
 
 ### 2.4 `InvestmentPosition`
 
@@ -125,8 +126,8 @@ Bitácora inmutable de **cada** movimiento de cashback hacia una posición. Es l
 | Campo | Tipo | Notas |
 |---|---|---|
 | id | UUID (PK) | |
-| positionId | FK → InvestmentPosition | la posición que **recibe** el monto |
-| type | ENUM | `MONTHLY_PERFORMANCE`, `MONTHLY_PERFORMANCE_REASSIGNED`, `REFERRAL_BONUS` |
+| positionId | FK → InvestmentPosition, **NULLABLE desde §7.3** | la posición que **recibe** el monto — NULL si `type = REFERRAL_BONUS_DIRECT` |
+| type | ENUM | `MONTHLY_PERFORMANCE`, `MONTHLY_PERFORMANCE_REASSIGNED`, `REFERRAL_BONUS`, `REFERRAL_BONUS_DIRECT` (agregado en §7.2 — comisión pagada directo a `available_balance`, sin posición asociada) |
 | amount | DECIMAL(14,2) | siempre positivo |
 | effectiveRate | DECIMAL(5,2), NULLABLE | ver §4.1 — solo se llena cuando hubo truncamiento |
 | sourcePerformanceId | FK → MonthlyPerformance, NULLABLE | si `type` empieza con `MONTHLY_PERFORMANCE` |
@@ -418,15 +419,17 @@ marcarPagado(solicitud, admin, txHash?):
 
 ---
 
-## 5. Supuestos pendientes de confirmación
+## 5. Supuestos — historial de confirmación
 
-| # | Supuesto | Impacto si está mal |
+| # | Supuesto | Estado |
 |---|---|---|
-| 1 | El tope de 30 paquetes / 33.000 USD es **acumulado por usuario**, no por compra individual | Cambiaría la validación en `Purchase.create()` |
-| 2 | Si el referente es elegible pero todas sus posiciones están `COMPLETED`, el bono queda en espera hasta que abra una nueva posición (no se paga "perdido" ni se aplica a una posición ya completada) | Cambiaría la lógica de `pagarBono()` |
-| 3 | El orden de "posición más reciente" para reasignar excedentes/bonos es por `createdAt DESC` (la posición más nueva primero) | Cambiaría qué posición específica recibe cada pago — afecta auditoría pero no el monto total |
+| 1 | El tope de 30 paquetes / 33.000 USD es **acumulado por usuario**, no por compra individual | ✅ Confirmado por el cliente (solo aplica a Driver, ver §7.1) |
+| 2 | ~~Si el referente es elegible pero todas sus posiciones están `COMPLETED`, el bono queda en espera hasta que abra una nueva posición~~ | ✅ Confirmado inicialmente, luego **reemplazado en §7.2**: ahora se paga directo a `available_balance` en ese caso |
+| 3 | El orden de "posición más reciente" para reasignar excedentes/bonos es por `createdAt DESC` (la posición más nueva primero) | ✅ Confirmado por el cliente |
 
-Si alguno de estos tres no es correcto, se ajusta este documento antes de tocar código de Fase 4 en adelante (no rompe nada de lo ya construido, ya que aún no hay implementación).
+Los 3 quedaron resueltos antes de escribir código de Fase 6. El #2 cambió de
+respuesta una vez se introdujo Zenith (ver §7) — el documento ya refleja la
+versión final, no la original.
 
 ---
 
@@ -436,3 +439,120 @@ Si alguno de estos tres no es correcto, se ajusta este documento antes de tocar 
 - Todo lo descrito en §4 corre dentro de una **transacción de base de datos** por posición afectada (o por todo el lote del `MonthlyPerformance`, evaluar en Fase 6 si se hace todo en una sola transacción grande o por posición con compensación en caso de fallo parcial).
 - `CashbackTransaction` es **inmutable** — nunca se actualiza ni se borra una fila ya creada, solo se insertan nuevas filas. Es la fuente de verdad auditable.
 - El job que aplica `MonthlyPerformance` debe ser **idempotente**: si se corre dos veces por error, no debe duplicar pagos (verificar `appliedAt IS NULL` antes de ejecutar, y marcarlo dentro de la misma transacción).
+
+---
+
+## 7. Adenda — Fase 6: separación Driver / Zenith (reemplaza partes de §4.2 y §5)
+
+> Este apartado documenta un cambio de negocio real ocurrido durante la Fase 6,
+> después de que el resto del documento ya estaba aprobado. Donde contradiga
+> algo de las secciones 1–6, **esta adenda manda**.
+
+### 7.1 Dos productos, no uno
+
+El negocio ya no vende "un único servicio" — vende dos productos independientes:
+
+| | Luxtrox Driver | Luxtrox Zenith |
+|---|---|---|
+| Precio | $1,099 USD (antes $1,100) | $2,299 USD |
+| Qué es | Lo que ya existía: el equipo opera el capital del usuario | Se vende e instala un bot de trading; el usuario opera por su cuenta |
+| ¿Crea `InvestmentPosition`? | Sí, igual que siempre (`target_cashback = capital × 3`) | **No** — Zenith no participa del motor de cashback en absoluto |
+| ¿Recibe rendimiento mensual? | Sí | No |
+| Recurrencia | Ninguna (pago único, hasta 30 paquetes acumulados) | Renovación anual obligatoria de $250 para mantener el bot activo |
+| Tope de 30 paquetes (§2.3) | Aplica, sin cambios | No aplica — Zenith es cantidad fija de 1 por compra, no cuenta para `total_packages_purchased` |
+
+### 7.2 Comisión de referido — reemplaza completamente el bono fijo de $100 (§4.2 original)
+
+La comisión ya no es un monto fijo. Depende de qué compró el **referido**:
+
+- Venta de Driver referida → el **referente** gana **9%** del precio = `1099 × 0.09` = **$98.91**
+- Venta de Zenith referida → el **referente** gana **40%** del precio = `2299 × 0.40` = **$919.60**
+
+**Elegibilidad para ganar comisiones (reemplaza la condición original "posición activa o completada"):**
+El referente es elegible con **cualquier compra confirmada**, Driver o Zenith — no es necesario haber comprado Driver específicamente.
+
+**Dónde aterriza la comisión (reemplaza por completo el `QUALIFIED_AWAITING_REFERRER` por falta de posición):**
+
+```
+monto = comisión calculada según el plan que compró el referido
+
+destino = posición ACTIVA más reciente del referente con cashbackRemaining > 0
+          (busca solo entre posiciones DRIVER -- Zenith nunca es destino,
+           no tiene cashback_remaining)
+
+si destino existe:
+    aplicar = min(monto, destino.cashbackRemaining)
+    destino.cashbackPaid      += aplicar
+    destino.cashbackRemaining -= aplicar
+    si destino.cashbackRemaining == 0: destino.status = COMPLETED
+    sobra = monto - aplicar
+si destino no existe (el referente solo tiene Zenith, o todas sus
+                       posiciones Driver ya estan COMPLETED):
+    sobra = monto   // nada que aplicar a ninguna posicion
+
+referente.availableBalance += monto   // SIEMPRE el monto completo,
+                                       // haya o no posicion de por medio
+
+si sobra > 0:
+    crear CashbackTransaction sin position_id asociado, tipo
+    REFERRAL_BONUS_DIRECT, registrando que esa parte (o el monto
+    completo) fue directo a available_balance sin pasar por ninguna
+    posicion -- mantiene la auditoria completa aunque no haya
+    "adelanto de cashback" de por medio.
+```
+
+> **Esto ya NO es lo mismo que el algoritmo 4.1** (rendimiento mensual): ahí, el
+> excedente que no cabe en ninguna posición se pierde (no se paga). Aquí, el
+> referente **sí** recibe el dinero completo siempre — solo cambia si ese dinero
+> se contabiliza también como "avance de cashback" de una posición Driver o no.
+> Es una decisión de negocio explícita confirmada por el cliente, no una
+> inconsistencia.
+
+`Referral.status = QUALIFIED_AWAITING_REFERRER` **sigue existiendo**, pero ahora
+significa algo más estrecho que en el diseño original: ya no se alcanza por
+"el referente tiene posiciones pero todas están completas" (eso ahora se paga
+directo a `available_balance`, ver arriba) — se alcanza **solo** cuando el
+referente **todavía no tiene ninguna compra confirmada de ningún tipo**
+(ni Driver ni Zenith). En ese caso sí hay que esperar: cuando el referente
+confirme su primera compra (la que sea), se re-evalúan sus referidos pendientes
+y se paga lo que corresponda.
+
+`[SUPUESTO 4 — NO confirmado explícitamente por el cliente, decisión tomada al
+implementar]`: el bono de referido es **un evento único por relación de
+referido**, no por compra. Si la misma persona referida hace una segunda
+compra más adelante (ej. compra Driver y luego también Zenith), el referente
+**no** cobra una segunda comisión — solo la primera compra confirmada de ese
+referido dispara el pago. Si esto no es lo que se quiere (por ejemplo, si cada
+compra del referido —Driver y Zenith— debería pagar su propia comisión por
+separado), avisar para ajustar `ReferralService.onReferredPurchaseConfirmed()`.
+
+### 7.3 Cambios de esquema (Flyway V16, no se modifican migraciones ya aplicadas)
+
+```sql
+ALTER TABLE purchases ADD COLUMN plan_type VARCHAR(10) NOT NULL DEFAULT 'DRIVER'
+    CHECK (plan_type IN ('DRIVER', 'ZENITH'));
+
+CREATE TABLE zenith_licenses (
+    id                   UUID PRIMARY KEY,
+    user_id              UUID NOT NULL REFERENCES users(id),
+    purchase_id          UUID NOT NULL UNIQUE REFERENCES purchases(id),
+    status               VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','EXPIRED')),
+    activated_at         TIMESTAMPTZ NOT NULL,
+    current_period_end   TIMESTAMPTZ NOT NULL,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE zenith_renewal_payments (
+    id           UUID PRIMARY KEY,
+    license_id   UUID NOT NULL REFERENCES zenith_licenses(id),
+    amount       DECIMAL(14,2) NOT NULL CHECK (amount = 250.00),
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end   TIMESTAMPTZ NOT NULL,
+    paid_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`cashback_transactions.position_id` debe pasar a ser **NULLABLE** (ya no es
+`NOT NULL`) para soportar el nuevo tipo `REFERRAL_BONUS_DIRECT`, que no
+referencia ninguna posición.
+

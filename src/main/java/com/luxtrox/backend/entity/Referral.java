@@ -6,12 +6,12 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Un registro por usuario referido (unique referred_user_id). El bono
- * de $100 solo se paga cuando referente Y referido cumplen sus
- * condiciones -- puede quedar QUALIFIED_AWAITING_REFERRER si el
- * referente todavia no tiene ninguna posicion propia (ver
- * docs/domain-model.md 3.3 y 4.2). La logica de transicion vive en el
- * servicio de Fase 6, esta clase es solo el dato.
+ * Un registro por usuario referido (unique referred_user_id). La
+ * comision (9% Driver / 40% Zenith, ver docs/domain-model.md 7.2)
+ * solo se paga cuando referente Y referido cumplen sus condiciones --
+ * puede quedar QUALIFIED_AWAITING_REFERRER si el referente todavia no
+ * tiene NINGUNA compra confirmada (ni Driver ni Zenith). La logica de
+ * transicion vive en ReferralService, esta clase es solo el dato.
  */
 @Entity
 @Table(name = "referrals")
@@ -46,6 +46,16 @@ public class Referral {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "target_position_id")
     private InvestmentPosition targetPosition;
+
+    /**
+     * La compra del REFERIDO que califico esta referral -- necesaria
+     * para saber, en el momento de pagar (que puede ser despues, si
+     * el referente recien se vuelve elegible), si la comision es 9%
+     * (Driver) o 40% (Zenith). Ver docs/domain-model.md 7.2.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "triggering_purchase_id")
+    private Purchase triggeringPurchase;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -113,6 +123,14 @@ public class Referral {
 
     public void setTargetPosition(InvestmentPosition targetPosition) {
         this.targetPosition = targetPosition;
+    }
+
+    public Purchase getTriggeringPurchase() {
+        return triggeringPurchase;
+    }
+
+    public void setTriggeringPurchase(Purchase triggeringPurchase) {
+        this.triggeringPurchase = triggeringPurchase;
     }
 
     public OffsetDateTime getCreatedAt() {

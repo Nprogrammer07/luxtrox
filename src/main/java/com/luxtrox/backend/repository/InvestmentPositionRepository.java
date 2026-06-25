@@ -11,6 +11,15 @@ public interface InvestmentPositionRepository extends JpaRepository<InvestmentPo
 
     List<InvestmentPosition> findByStatus(PositionStatus status);
 
+    /**
+     * Orden deterministico para el bucle PRINCIPAL del algoritmo de
+     * distribucion mensual (docs/domain-model.md 4.1) -- no es
+     * sensible a cual orden exacto se use (a diferencia de la
+     * cascada de reasignacion, que SI exige "mas reciente primero"),
+     * pero debe ser deterministico para que el job sea reproducible.
+     */
+    List<InvestmentPosition> findByStatusOrderByCreatedAtAsc(PositionStatus status);
+
     List<InvestmentPosition> findByUserAndStatus(User user, PositionStatus status);
 
     /**

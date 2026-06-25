@@ -1,6 +1,7 @@
 package com.luxtrox.backend.entity;
 
 import com.luxtrox.backend.entity.enums.PaymentMethod;
+import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PurchaseStatus;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -8,13 +9,16 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Una compra siempre genera UNA sola posicion sin importar cuantos
- * paquetes contenga (ver docs/domain-model.md 2.3). La relacion con
- * InvestmentPosition es 1:1 con columnas FK fisicas en AMBOS lados
- * (purchases.position_id y investment_positions.purchase_id) -- asi
- * se diseno deliberadamente en las migraciones de Fase 3, por eso aqui
- * son dos asociaciones @OneToOne independientes, no una sola con
- * mappedBy.
+ * Una compra DRIVER siempre genera UNA sola posicion sin importar
+ * cuantos paquetes contenga (ver docs/domain-model.md 2.3). Una
+ * compra ZENITH NUNCA genera posicion -- genera una ZenithLicense en
+ * su lugar (ver docs/domain-model.md 7.1, adenda de Fase 6).
+ *
+ * La relacion con InvestmentPosition es 1:1 con columnas FK fisicas en
+ * AMBOS lados (purchases.position_id y investment_positions.purchase_id)
+ * -- asi se diseno deliberadamente en las migraciones de Fase 3, por
+ * eso aqui son dos asociaciones @OneToOne independientes, no una sola
+ * con mappedBy.
  */
 @Entity
 @Table(name = "purchases")
@@ -28,6 +32,10 @@ public class Purchase {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "plan_type", nullable = false, length = 10)
+    private PlanType planType;
 
     @Column(name = "package_quantity", nullable = false)
     private Integer packageQuantity;
@@ -57,8 +65,10 @@ public class Purchase {
         // JPA
     }
 
-    public Purchase(User user, Integer packageQuantity, BigDecimal totalAmount, PaymentMethod paymentMethod) {
+    public Purchase(User user, PlanType planType, Integer packageQuantity,
+                     BigDecimal totalAmount, PaymentMethod paymentMethod) {
         this.user = user;
+        this.planType = planType;
         this.packageQuantity = packageQuantity;
         this.totalAmount = totalAmount;
         this.paymentMethod = paymentMethod;
@@ -77,6 +87,10 @@ public class Purchase {
 
     public User getUser() {
         return user;
+    }
+
+    public PlanType getPlanType() {
+        return planType;
     }
 
     public Integer getPackageQuantity() {

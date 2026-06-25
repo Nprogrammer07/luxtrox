@@ -1,0 +1,157 @@
+package com.luxtrox.backend.service;
+
+import com.luxtrox.backend.entity.*;
+import com.luxtrox.backend.entity.enums.BankAccountType;
+import com.luxtrox.backend.entity.enums.WithdrawalStatus;
+import com.luxtrox.backend.entity.enums.WithdrawalType;
+import com.luxtrox.backend.exception.BusinessRuleException;
+import com.luxtrox.backend.exception.ResourceNotFoundException;
+import com.luxtrox.backend.repository.BankWithdrawalDetailRepository;
+import com.luxtrox.backend.repository.CryptoWithdrawalDetailRepository;
+import com.luxtrox.backend.repository.UserRepository;
+import com.luxtrox.backend.repository.WithdrawalRequestRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.UUID;
+
+/**
+ * Implementa el algoritmo de retiros descrito en docs/domain-model.md
+ * §4.3. El monto se descuenta de available_balance INMEDIATAMENTE al
+ * solicitar; el usuario no puede cancelar -- solo el admin puede
+ * rechazar (lo cual SI devuelve el saldo).
+ */
+@Service
+public class WithdrawalService {
+
+    private static final BigDecimal MIN_WITHDRAWAL_AMOUNT = new BigDecimal("50.00");
+
+    private final WithdrawalRequestRepository withdrawalRequestRepository;
+    private final CryptoWithdrawalDetailRepository cryptoDetailRepository;
+    private final BankWithdrawalDetailRepository bankDetailRepository;
+    private final UserRepository userRepository;
+    private final AuditService auditService;
+
+    public WithdrawalService(WithdrawalRequestRepository withdrawalRequestRepository,
+                              CryptoWithdrawalDetailRepository cryptoDetailRepository,
+                              BankWithdrawalDetailRepository bankDetailRepository,
+                              UserRepository userRepository,
+                              AuditService auditService) {
+        this.withdrawalRequestRepository = withdrawalRequestRepository;
+        this.cryptoDetailRepository = cryptoDetailRepository;
+        this.bankDetailRepository = bankDetailRepository;
+        this.userRepository = userRepository;
+        this.auditService = auditService;
+    }
+
+    @Transactional
+    public WithdrawalRequest requestCrypto(User user, BigDecimal amount, String fullName, String email,
+                                            String phone, String blockchainNetwork, String walletAddress) {
+        WithdrawalRequest request = createBaseRequest(user, WithdrawalType.CRYPTO, amount);
+        cryptoDetailRepository.save(new CryptoWithdrawalDetail(
+                request, fullName, email, phone, blockchainNetwork, walletAddress));
+        return request;
+    }
+
+    @Transactional
+    public WithdrawalRequest requestBank(User user, BigDecimal amount, String fullName, String email, String phone,
+                                          String country, String bankName, BankAccountType accountType,
+                                          String accountNumber, String accountHolderName, String documentId) {
+        WithdrawalRequest request = createBaseRequest(user, WithdrawalType.BANK, amount);
+        bankDetailRepository.save(new BankWithdrawalDetail(
+                request, fullName, email, phone, country, bankName, accountType,
+                accountNumber, accountHolderName, documentId));
+        return request;
+    }
+
+    private WithdrawalRequest createBaseRequest(User user, WithdrawalType type, BigDecimal amount) {
+        if (amount == null || amount.compareTo(MIN_WITHDRAWAL_AMOUNT) < 0) {
+            throw new BusinessRuleException("El monto minimo de retiro es $" + MIN_WITHDRAWAL_AMOUNT);
+        }
+        if (amount.compareTo(user.getAvailableBalance()) > 0) {
+            throw new BusinessRuleException("El monto solicitado supera el saldo disponible");
+        }
+
+        BigDecimal oldBalance = user.getAvailableBalance();
+        user.setAvailableBalance(user.getAvailableBalance().subtract(amount));
+        userRepository.save(user);
+
+        WithdrawalRequest request = withdrawalRequestRepository.save(new WithdrawalRequest(user, type, amount));
+
+        auditService.record(user, "User", user.getId(), "WITHDRAWAL_REQUESTED_BALANCE_DEDUCTED",
+                oldBalance, user.getAvailableBalance());
+        auditService.record(user, "WithdrawalRequest", request.getId(), "REQUESTED",
+                null, request.getStatus());
+
+        return request;
+    }
+
+    @Transactional
+    public WithdrawalRequest approve(UUID withdrawalId, User admin) {
+        WithdrawalRequest request = getRequestedOrThrow(withdrawalId);
+
+        request.setStatus(WithdrawalStatus.APPROVED);
+        request.setProcessedAt(OffsetDateTime.now());
+        request.setProcessedByAdmin(admin);
+        withdrawalRequestRepository.save(request);
+
+        auditService.record(admin, "WithdrawalRequest", request.getId(), "APPROVED",
+                WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED);
+        return request;
+    }
+
+    /** Rechazar SI devuelve el saldo al usuario (ver docs/domain-model.md 4.3). */
+    @Transactional
+    public WithdrawalRequest reject(UUID withdrawalId, User admin, String adminNotes) {
+        WithdrawalRequest request = getRequestedOrThrow(withdrawalId);
+
+        request.setStatus(WithdrawalStatus.REJECTED);
+        request.setProcessedAt(OffsetDateTime.now());
+        request.setProcessedByAdmin(admin);
+        request.setAdminNotes(adminNotes);
+        withdrawalRequestRepository.save(request);
+
+        User user = request.getUser();
+        BigDecimal oldBalance = user.getAvailableBalance();
+        user.setAvailableBalance(user.getAvailableBalance().add(request.getAmount()));
+        userRepository.save(user);
+
+        auditService.record(admin, "WithdrawalRequest", request.getId(), "REJECTED",
+                WithdrawalStatus.REQUESTED, WithdrawalStatus.REJECTED);
+        auditService.record(user, "User", user.getId(), "WITHDRAWAL_REJECTED_BALANCE_REFUNDED",
+                oldBalance, user.getAvailableBalance());
+
+        return request;
+    }
+
+    @Transactional
+    public WithdrawalRequest markPaid(UUID withdrawalId, User admin) {
+        WithdrawalRequest request = withdrawalRequestRepository.findById(withdrawalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Retiro no encontrado"));
+
+        if (request.getStatus() != WithdrawalStatus.APPROVED) {
+            throw new BusinessRuleException("Solo se puede marcar como pagado un retiro ya APPROVED");
+        }
+
+        request.setStatus(WithdrawalStatus.PAID);
+        request.setPaidAt(OffsetDateTime.now());
+        withdrawalRequestRepository.save(request);
+
+        auditService.record(admin, "WithdrawalRequest", request.getId(), "PAID",
+                WithdrawalStatus.APPROVED, WithdrawalStatus.PAID);
+        return request;
+    }
+
+    private WithdrawalRequest getRequestedOrThrow(UUID withdrawalId) {
+        WithdrawalRequest request = withdrawalRequestRepository.findById(withdrawalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Retiro no encontrado"));
+        if (request.getStatus() != WithdrawalStatus.REQUESTED) {
+            throw new BusinessRuleException(
+                    "Solo se puede procesar un retiro en estado REQUESTED (estado actual: "
+                            + request.getStatus() + ")");
+        }
+        return request;
+    }
+}

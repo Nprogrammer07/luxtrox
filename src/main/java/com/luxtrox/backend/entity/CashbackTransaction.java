@@ -7,10 +7,20 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Bitacora INMUTABLE de cada movimiento de cashback hacia una
- * posicion -- nunca se actualiza ni se borra una fila ya creada, solo
- * se insertan nuevas (ver docs/domain-model.md 2.6). Por eso esta
- * clase no expone setters salvo los que el constructor necesita.
+ * Bitacora INMUTABLE de cada movimiento de cashback -- nunca se
+ * actualiza ni se borra una fila ya creada, solo se insertan nuevas
+ * (ver docs/domain-model.md 2.6). Por eso esta clase no expone
+ * setters salvo los que el constructor necesita.
+ *
+ * Dos formas mutuamente excluyentes de identificar al destinatario
+ * (ver docs/domain-model.md 7.3, adenda de Fase 6):
+ *  - type != REFERRAL_BONUS_DIRECT  -> SIEMPRE position (se deriva
+ *    el usuario via position.getUser()), NUNCA user directo.
+ *  - type == REFERRAL_BONUS_DIRECT  -> SIEMPRE user directo (no hay
+ *    posicion de donde derivarlo -- la comisión fue directo al
+ *    available_balance sin pasar por ninguna posicion), NUNCA position.
+ * Esto esta forzado por el CHECK chk_referral_direct_no_position en
+ * la base de datos, no solo por convencion en este codigo.
  */
 @Entity
 @Table(name = "cashback_transactions")
@@ -21,9 +31,13 @@ public class CashbackTransaction {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "position_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "position_id")
     private InvestmentPosition position;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 40)
@@ -54,9 +68,21 @@ public class CashbackTransaction {
         // JPA
     }
 
+    /** Para todo tipo que SI esta asociado a una posicion (todos salvo REFERRAL_BONUS_DIRECT). */
     public CashbackTransaction(InvestmentPosition position, CashbackTransactionType type, BigDecimal amount) {
+        if (type == CashbackTransactionType.REFERRAL_BONUS_DIRECT) {
+            throw new IllegalArgumentException(
+                    "REFERRAL_BONUS_DIRECT no lleva position -- usar el constructor con User");
+        }
         this.position = position;
         this.type = type;
+        this.amount = amount;
+    }
+
+    /** Exclusivo para REFERRAL_BONUS_DIRECT -- paga directo a available_balance, sin posicion. */
+    public CashbackTransaction(User user, BigDecimal amount) {
+        this.user = user;
+        this.type = CashbackTransactionType.REFERRAL_BONUS_DIRECT;
         this.amount = amount;
     }
 
@@ -73,6 +99,15 @@ public class CashbackTransaction {
 
     public InvestmentPosition getPosition() {
         return position;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    /** El usuario destinatario, sea por posicion o directo (conveniencia para el servicio). */
+    public User resolveRecipient() {
+        return position != null ? position.getUser() : user;
     }
 
     public CashbackTransactionType getType() {
