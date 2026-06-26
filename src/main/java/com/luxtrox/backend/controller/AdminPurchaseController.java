@@ -31,13 +31,14 @@ public class AdminPurchaseController {
     }
 
     @PostMapping("/{purchaseId}/confirm")
-    @Operation(summary = "Confirmar una compra ya pagada (crea posicion o licencia segun el plan)")
+    @Operation(summary = "Confirmar una compra ya pagada (crea posicion o licencia segun el plan). "
+            + "Solo deberia usarse para compras ALTERNATIVE -- las CRYPTO se confirman solas via webhook.")
     public ResponseEntity<PurchaseResponse> confirm(@PathVariable UUID purchaseId) {
         Purchase purchase = purchaseService.confirmPurchase(purchaseId);
         return ResponseEntity.ok(new PurchaseResponse(
                 purchase.getId(), purchase.getPlanType(), purchase.getPackageQuantity(),
                 purchase.getTotalAmount(), purchase.getPaymentMethod(), purchase.getStatus(),
-                purchase.getCreatedAt(), purchase.getConfirmedAt()
+                purchase.getCreatedAt(), purchase.getConfirmedAt(), null
         ));
     }
 

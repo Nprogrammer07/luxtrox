@@ -44,6 +44,8 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final NotificationEmailService notificationEmailService;
+    private final AuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(UserRepository userRepository,
@@ -52,7 +54,9 @@ public class AuthService {
                         RefreshTokenRepository refreshTokenRepository,
                         PasswordEncoder passwordEncoder,
                         JwtService jwtService,
-                        AuthenticationManager authenticationManager) {
+                        AuthenticationManager authenticationManager,
+                        NotificationEmailService notificationEmailService,
+                        AuditService auditService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.referralRepository = referralRepository;
@@ -60,6 +64,8 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
+        this.notificationEmailService = notificationEmailService;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -97,7 +103,20 @@ public class AuthService {
             ));
         }
 
-        return buildAuthResponse(savedUser);
+        return buildAuthResponse(welcomeAndReturn(savedUser));
+    }
+
+    /**
+     * Igual patron de aislamiento que el resto de los servicios: un
+     * fallo de Resend nunca debe tumbar el registro en si.
+     */
+    private User welcomeAndReturn(User user) {
+        try {
+            notificationEmailService.sendWelcomeEmail(user);
+        } catch (Exception e) {
+            auditService.recordSystemAction("User", user.getId(), "WELCOME_EMAIL_FAILED", null, e.getMessage());
+        }
+        return user;
     }
 
     @Transactional

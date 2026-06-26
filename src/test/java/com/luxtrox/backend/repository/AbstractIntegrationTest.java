@@ -32,10 +32,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  *
  * Requiere Docker corriendo en la maquina que ejecuta los tests.
  *
- * Tambien registra un app.jwt.secret de prueba -- application.yml
- * exige esa propiedad sin valor por defecto (por seguridad, en real
- * viene de una variable de entorno), asi que sin esto los tests de
- * Fase 5 en adelante no podrian arrancar el contexto.
+ * Tambien registra valores de prueba para TODAS las propiedades que
+ * application.yml exige sin default (vienen de variables de entorno
+ * en real, nunca hardcodeadas) -- sin esto, el contexto de Spring no
+ * arranca para NINGUN test, no solo los nuevos de la fase que las
+ * agrego.
  */
 @Testcontainers
 @SpringBootTest
@@ -58,5 +59,18 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("app.jwt.secret",
                 () -> "integration-test-secret-key-at-least-32-bytes-long-for-hs256");
+
+        // Fase 7 -- valores ficticios, ningun test de integracion real
+        // llama a NOWPayments/Resend/Supabase Storage de verdad; los
+        // tests de esos clientes usan mocks o prueban solo logica pura
+        // (ej. la firma HMAC) sin red.
+        registry.add("app.nowpayments.api-key", () -> "test-nowpayments-api-key");
+        registry.add("app.nowpayments.ipn-secret", () -> "test-nowpayments-ipn-secret");
+        registry.add("app.nowpayments.ipn-callback-url", () -> "http://localhost:8080/webhooks/nowpayments/ipn");
+        registry.add("app.resend.api-key", () -> "test-resend-api-key");
+        registry.add("app.storage.endpoint", () -> "http://localhost:9999/storage/v1/s3");
+        registry.add("app.storage.region", () -> "us-east-1");
+        registry.add("app.storage.access-key-id", () -> "test-access-key");
+        registry.add("app.storage.secret-access-key", () -> "test-secret-key");
     }
 }

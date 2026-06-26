@@ -192,7 +192,7 @@ Bitácora inmutable de **cada** movimiento de cashback hacia una posición. Es l
 | id | UUID (PK) |
 | purchaseId | FK → Purchase, UNIQUE |
 | invoiceNumber | VARCHAR, UNIQUE, secuencial |
-| pdfStorageKey | VARCHAR (referencia en Cloudflare R2) |
+| pdfStorageKey | VARCHAR (referencia en Supabase Storage, S3-compatible -- ver adenda §8, Fase 7) |
 | issuedAt | TIMESTAMP |
 | sentAt | TIMESTAMP, NULLABLE (vía Resend) |
 
@@ -555,4 +555,58 @@ CREATE TABLE zenith_renewal_payments (
 `cashback_transactions.position_id` debe pasar a ser **NULLABLE** (ya no es
 `NOT NULL`) para soportar el nuevo tipo `REFERRAL_BONUS_DIRECT`, que no
 referencia ninguna posición.
+
+## 8. Adenda — Fase 7: Integraciones externas
+
+### 8.1 Verificación de pago CRYPTO — NOWPayments (reemplaza la idea original de revisión manual)
+
+Las compras `paymentMethod = CRYPTO` se confirman automáticamente, no a mano:
+
+1. Al crear la compra, el backend pide un *invoice* a NOWPayments y devuelve
+   `cryptoInvoiceUrl` — el frontend redirige ahí al usuario para pagar.
+2. NOWPayments notifica el resultado vía un callback IPN a
+   `POST /webhooks/nowpayments/ipn`, firmado con HMAC-SHA512 sobre el JSON
+   del callback **con sus claves ordenadas recursivamente** (no solo el
+   primer nivel) antes de firmar — si la firma no es válida, se rechaza sin
+   procesar nada.
+3. Solo el estado `payment_status = "finished"` (liquidación final, no
+   `"confirmed"`, que es un paso intermedio) dispara
+   `PurchaseService.confirmPurchase()`.
+
+`purchases.nowpayments_invoice_id` (V17) guarda la referencia del invoice
+para trazabilidad/soporte.
+
+### 8.2 Almacenamiento de archivos — Supabase Storage (reemplaza Cloudflare R2)
+
+Cambio de proveedor decidido por el cliente durante esta fase: en vez de
+Cloudflare R2 (la idea original), se usa **Supabase Storage** en modo
+S3-compatible, ya que el proyecto ya tiene cuenta de Supabase y evita
+gestionar credenciales de un proveedor más. Usado para:
+- PDFs de factura (`invoices.pdf_storage_key`)
+- Comprobantes de pago alternativo (`alternative_payment_requests.payment_proof_storage_key`) —
+  ver supuesto pendiente abajo.
+
+### 8.3 Correos — Resend
+
+Eventos que disparan un correo (todos con manejo de fallos aislado: si Resend
+falla, la operación de negocio que lo disparó **no se revierte**, solo se
+registra en `audit_logs` para investigar después):
+
+| Evento | Disparado desde |
+|---|---|
+| Bienvenida al registrarse | `AuthService.register()` |
+| Compra confirmada (con factura PDF adjunta) | `PurchaseService.confirmPurchase()` |
+| Cambio de estado de retiro (aprobado/rechazado/pagado) | `WithdrawalService` |
+| Comisión de referido recibida | `ReferralService.payBonus()` |
+
+### 8.4 Pendiente — NO se construyó en esta fase
+
+`AlternativePaymentRequest` (el flujo de pago manual con comprobante +
+revisión de admin, diseñado desde la Fase 2) **sigue sin tener un service ni
+controller propios**. Esta fase se enfocó en lo que el cliente pidió
+explícitamente (NOWPayments, Resend, Storage) — el flujo `ALTERNATIVE`
+todavía no tiene forma de pasar de `PENDING` a `CONFIRMED` en la práctica.
+Si se va a usar ese método de pago, hace falta una fase de seguimiento para
+construirlo (reutilizando `SupabaseStorageClient` para subir el comprobante).
+
 

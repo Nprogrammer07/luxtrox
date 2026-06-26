@@ -61,6 +61,10 @@ public class Purchase {
     @Column(name = "confirmed_at")
     private OffsetDateTime confirmedAt;
 
+    /** Solo se llena para compras CRYPTO -- referencia al invoice creado en NOWPayments (Fase 7). */
+    @Column(name = "nowpayments_invoice_id", length = 100)
+    private String nowpaymentsInvoiceId;
+
     protected Purchase() {
         // JPA
     }
@@ -131,5 +135,13 @@ public class Purchase {
 
     public void setConfirmedAt(OffsetDateTime confirmedAt) {
         this.confirmedAt = confirmedAt;
+    }
+
+    public String getNowpaymentsInvoiceId() {
+        return nowpaymentsInvoiceId;
+    }
+
+    public void setNowpaymentsInvoiceId(String nowpaymentsInvoiceId) {
+        this.nowpaymentsInvoiceId = nowpaymentsInvoiceId;
     }
 }

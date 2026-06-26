@@ -59,6 +59,11 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/docs/**", "/api-docs/**", "/swagger-ui/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // Callbacks de proveedores externos (NOWPayments) -- no
+                // mandan JWT, se autentican con su propia firma HMAC
+                // (ver NowPaymentsSignatureVerifier). El controller
+                // mismo rechaza cualquier firma invalida.
+                .requestMatchers("/webhooks/**").permitAll()
                 // Agrupacion de endpoints segun el prompt maestro:
                 // /admin requiere rol ADMIN explicitamente.
                 .requestMatchers("/admin/**").hasRole("ADMIN")

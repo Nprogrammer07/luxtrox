@@ -5,9 +5,10 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Una factura por compra confirmada. El PDF se guarda en Cloudflare
- * R2 -- aqui solo se guarda la referencia/key, no el archivo. Se
- * envia por correo via Resend (ver docs/domain-model.md 2.11).
+ * Una factura por compra confirmada. El PDF se guarda en Supabase
+ * Storage (S3-compatible) -- aqui solo se guarda la referencia/key, no
+ * el archivo. Se envia por correo via Resend (ver docs/domain-model.md
+ * 2.11 y adenda de Fase 7).
  */
 @Entity
 @Table(name = "invoices")

@@ -16,6 +16,9 @@ public record PurchaseResponse(
         PaymentMethod paymentMethod,
         PurchaseStatus status,
         OffsetDateTime createdAt,
-        OffsetDateTime confirmedAt
+        OffsetDateTime confirmedAt,
+        // Solo viene relleno para compras CRYPTO recien creadas -- el
+        // frontend debe redirigir al usuario aqui para pagar.
+        String cryptoInvoiceUrl
 ) {
 }

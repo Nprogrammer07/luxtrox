@@ -6,6 +6,8 @@ import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PurchaseStatus;
 import com.luxtrox.backend.exception.BusinessRuleException;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
+import com.luxtrox.backend.integration.nowpayments.NowPaymentsClient;
+import com.luxtrox.backend.integration.nowpayments.dto.CreateInvoiceResponse;
 import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.repository.UserRepository;
@@ -22,6 +24,11 @@ import java.util.UUID;
  * 7.1). DRIVER genera una InvestmentPosition (participa del motor de
  * cashback); ZENITH genera una ZenithLicense (no participa de cashback
  * en absoluto, solo requiere renovacion anual -- ver ZenithService).
+ *
+ * Fase 7: las compras CRYPTO generan un invoice en NOWPayments
+ * (initiateCryptoPayment); al confirmarse CUALQUIER compra (sin
+ * importar el metodo de pago) se genera la factura PDF y se envia el
+ * correo de confirmacion.
  */
 @Service
 public class PurchaseService {
@@ -32,19 +39,28 @@ public class PurchaseService {
     private final ZenithLicenseRepository zenithLicenseRepository;
     private final ReferralService referralService;
     private final AuditService auditService;
+    private final NowPaymentsClient nowPaymentsClient;
+    private final InvoiceService invoiceService;
+    private final NotificationEmailService notificationEmailService;
 
     public PurchaseService(PurchaseRepository purchaseRepository,
                             UserRepository userRepository,
                             InvestmentPositionRepository positionRepository,
                             ZenithLicenseRepository zenithLicenseRepository,
                             ReferralService referralService,
-                            AuditService auditService) {
+                            AuditService auditService,
+                            NowPaymentsClient nowPaymentsClient,
+                            InvoiceService invoiceService,
+                            NotificationEmailService notificationEmailService) {
         this.purchaseRepository = purchaseRepository;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
         this.zenithLicenseRepository = zenithLicenseRepository;
         this.referralService = referralService;
         this.auditService = auditService;
+        this.nowPaymentsClient = nowPaymentsClient;
+        this.invoiceService = invoiceService;
+        this.notificationEmailService = notificationEmailService;
     }
 
     @Transactional
@@ -76,11 +92,31 @@ public class PurchaseService {
     }
 
     /**
+     * Solo aplica a compras con paymentMethod = CRYPTO. Crea el
+     * invoice en NOWPayments, guarda su id en la compra, y devuelve la
+     * URL a la que el frontend debe redirigir al usuario para pagar.
+     * La confirmacion real llega despues, de forma asincrona, via
+     * NowPaymentsWebhookController -- esta llamada NUNCA confirma la
+     * compra por si misma.
+     */
+    @Transactional
+    public String initiateCryptoPayment(Purchase purchase) {
+        if (purchase.getPaymentMethod() != PaymentMethod.CRYPTO) {
+            throw new BusinessRuleException("initiateCryptoPayment solo aplica a compras CRYPTO");
+        }
+        CreateInvoiceResponse invoice = nowPaymentsClient.createInvoice(purchase);
+        purchase.setNowpaymentsInvoiceId(invoice.id());
+        purchaseRepository.save(purchase);
+        return invoice.invoiceUrl();
+    }
+
+    /**
      * Confirma una compra ya pagada: crea la posicion (DRIVER) o la
-     * licencia (ZENITH), actualiza contadores del usuario, y dispara
-     * la evaluacion de comisiones de referido en ambas direcciones
-     * (el comprador como referido, y el comprador como referente de
-     * otros que estaban esperando -- ver docs/domain-model.md 7.2).
+     * licencia (ZENITH), actualiza contadores del usuario, genera la
+     * factura PDF + correo de confirmacion, y dispara la evaluacion de
+     * comisiones de referido en ambas direcciones (el comprador como
+     * referido, y el comprador como referente de otros que estaban
+     * esperando -- ver docs/domain-model.md 7.2).
      */
     @Transactional
     public Purchase confirmPurchase(UUID purchaseId) {
@@ -119,6 +155,8 @@ public class PurchaseService {
         auditService.record(user, "Purchase", purchase.getId(), "PURCHASE_CONFIRMED",
                 PurchaseStatus.PENDING, PurchaseStatus.CONFIRMED);
 
+        generateInvoiceAndNotify(purchase);
+
         // El comprador puede ser un REFERIDO de alguien -- evalua y
         // paga esa comision si corresponde.
         referralService.onReferredPurchaseConfirmed(purchase);
@@ -129,5 +167,23 @@ public class PurchaseService {
         referralService.onReferrerPurchaseConfirmed(user);
 
         return purchase;
+    }
+
+    /**
+     * Aislado en su propio metodo para que un fallo de email/PDF
+     * (ej. Resend caido) NUNCA tumbe la confirmacion de la compra en
+     * si -- el dinero/posicion/licencia ya quedaron correctos antes de
+     * llegar aqui. Se atrapa cualquier excepcion y solo se deja
+     * constancia en el log, no se relanza.
+     */
+    private void generateInvoiceAndNotify(Purchase purchase) {
+        try {
+            InvoiceService.InvoiceWithBytes result = invoiceService.generateStoreAndReturnBytes(purchase);
+            notificationEmailService.sendPurchaseConfirmedEmail(
+                    purchase, result.pdfBytes(), result.invoice().getInvoiceNumber());
+        } catch (Exception e) {
+            auditService.recordSystemAction("Purchase", purchase.getId(), "INVOICE_OR_EMAIL_FAILED",
+                    null, e.getMessage());
+        }
     }
 }

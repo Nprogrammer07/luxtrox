@@ -33,17 +33,20 @@ public class WithdrawalService {
     private final BankWithdrawalDetailRepository bankDetailRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final NotificationEmailService notificationEmailService;
 
     public WithdrawalService(WithdrawalRequestRepository withdrawalRequestRepository,
                               CryptoWithdrawalDetailRepository cryptoDetailRepository,
                               BankWithdrawalDetailRepository bankDetailRepository,
                               UserRepository userRepository,
-                              AuditService auditService) {
+                              AuditService auditService,
+                              NotificationEmailService notificationEmailService) {
         this.withdrawalRequestRepository = withdrawalRequestRepository;
         this.cryptoDetailRepository = cryptoDetailRepository;
         this.bankDetailRepository = bankDetailRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
+        this.notificationEmailService = notificationEmailService;
     }
 
     @Transactional
@@ -99,6 +102,7 @@ public class WithdrawalService {
 
         auditService.record(admin, "WithdrawalRequest", request.getId(), "APPROVED",
                 WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED);
+        notifyStatusChangeQuietly(request, "Aprobado");
         return request;
     }
 
@@ -122,6 +126,7 @@ public class WithdrawalService {
                 WithdrawalStatus.REQUESTED, WithdrawalStatus.REJECTED);
         auditService.record(user, "User", user.getId(), "WITHDRAWAL_REJECTED_BALANCE_REFUNDED",
                 oldBalance, user.getAvailableBalance());
+        notifyStatusChangeQuietly(request, "Rechazado");
 
         return request;
     }
@@ -141,7 +146,22 @@ public class WithdrawalService {
 
         auditService.record(admin, "WithdrawalRequest", request.getId(), "PAID",
                 WithdrawalStatus.APPROVED, WithdrawalStatus.PAID);
+        notifyStatusChangeQuietly(request, "Pagado");
         return request;
+    }
+
+    /**
+     * Igual que en PurchaseService: un fallo de Resend nunca debe
+     * tumbar la transaccion de un retiro real (aprobar/rechazar/pagar
+     * ya movieron dinero de verdad antes de llegar aqui).
+     */
+    private void notifyStatusChangeQuietly(WithdrawalRequest request, String statusLabel) {
+        try {
+            notificationEmailService.sendWithdrawalStatusChangedEmail(request, statusLabel);
+        } catch (Exception e) {
+            auditService.recordSystemAction("WithdrawalRequest", request.getId(), "EMAIL_NOTIFICATION_FAILED",
+                    null, e.getMessage());
+        }
     }
 
     private WithdrawalRequest getRequestedOrThrow(UUID withdrawalId) {

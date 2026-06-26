@@ -3,6 +3,7 @@ package com.luxtrox.backend.controller;
 import com.luxtrox.backend.dto.purchase.CreatePurchaseRequest;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.entity.Purchase;
+import com.luxtrox.backend.entity.enums.PaymentMethod;
 import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
@@ -30,25 +31,31 @@ public class PurchaseController {
     }
 
     @PostMapping
-    @Operation(summary = "Crear una compra (Driver o Zenith) en estado PENDING")
+    @Operation(summary = "Crear una compra (Driver o Zenith) en estado PENDING. "
+            + "Si paymentMethod=CRYPTO, la respuesta incluye cryptoInvoiceUrl para redirigir al usuario a pagar.")
     public ResponseEntity<PurchaseResponse> create(@AuthenticationPrincipal CustomUserPrincipal principal,
                                                      @Valid @RequestBody CreatePurchaseRequest request) {
         Purchase purchase = request.planType() == PlanType.DRIVER
                 ? purchaseService.createDriverPurchase(principal.getUser(), request.packageQuantity(), request.paymentMethod())
                 : purchaseService.createZenithPurchase(principal.getUser(), request.paymentMethod());
 
-        return ResponseEntity.ok(toResponse(purchase));
+        String cryptoInvoiceUrl = null;
+        if (purchase.getPaymentMethod() == PaymentMethod.CRYPTO) {
+            cryptoInvoiceUrl = purchaseService.initiateCryptoPayment(purchase);
+        }
+
+        return ResponseEntity.ok(toResponse(purchase, cryptoInvoiceUrl));
     }
 
     @GetMapping
     @Operation(summary = "Listar mis propias compras")
     public ResponseEntity<List<PurchaseResponse>> myPurchases(@AuthenticationPrincipal CustomUserPrincipal principal) {
         List<PurchaseResponse> response = purchaseRepository.findByUser(principal.getUser())
-                .stream().map(this::toResponse).toList();
+                .stream().map(p -> toResponse(p, null)).toList();
         return ResponseEntity.ok(response);
     }
 
-    private PurchaseResponse toResponse(Purchase purchase) {
+    private PurchaseResponse toResponse(Purchase purchase, String cryptoInvoiceUrl) {
         return new PurchaseResponse(
                 purchase.getId(),
                 purchase.getPlanType(),
@@ -57,7 +64,8 @@ public class PurchaseController {
                 purchase.getPaymentMethod(),
                 purchase.getStatus(),
                 purchase.getCreatedAt(),
-                purchase.getConfirmedAt()
+                purchase.getConfirmedAt(),
+                cryptoInvoiceUrl
         );
     }
 }

@@ -40,19 +40,22 @@ public class ReferralService {
     private final InvestmentPositionRepository positionRepository;
     private final CashbackTransactionRepository cashbackTransactionRepository;
     private final AuditService auditService;
+    private final NotificationEmailService notificationEmailService;
 
     public ReferralService(ReferralRepository referralRepository,
                             UserRepository userRepository,
                             PurchaseRepository purchaseRepository,
                             InvestmentPositionRepository positionRepository,
                             CashbackTransactionRepository cashbackTransactionRepository,
-                            AuditService auditService) {
+                            AuditService auditService,
+                            NotificationEmailService notificationEmailService) {
         this.referralRepository = referralRepository;
         this.userRepository = userRepository;
         this.purchaseRepository = purchaseRepository;
         this.positionRepository = positionRepository;
         this.cashbackTransactionRepository = cashbackTransactionRepository;
         this.auditService = auditService;
+        this.notificationEmailService = notificationEmailService;
     }
 
     /**
@@ -194,5 +197,21 @@ public class ReferralService {
         referral.setStatus(ReferralStatus.BONUS_PAID);
         referral.setBonusPaidAt(OffsetDateTime.now());
         referralRepository.save(referral);
+
+        notifyReferrerQuietly(referrer, commission);
+    }
+
+    /**
+     * Igual patron que PurchaseService/WithdrawalService: un fallo de
+     * Resend nunca debe tumbar el pago de la comision, que ya quedo
+     * correcto antes de llegar aqui.
+     */
+    private void notifyReferrerQuietly(User referrer, BigDecimal commission) {
+        try {
+            notificationEmailService.sendReferralBonusReceivedEmail(referrer, commission);
+        } catch (Exception e) {
+            auditService.recordSystemAction("User", referrer.getId(), "REFERRAL_EMAIL_NOTIFICATION_FAILED",
+                    null, e.getMessage());
+        }
     }
 }
