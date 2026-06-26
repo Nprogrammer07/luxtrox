@@ -609,4 +609,68 @@ todavía no tiene forma de pasar de `PENDING` a `CONFIRMED` en la práctica.
 Si se va a usar ese método de pago, hace falta una fase de seguimiento para
 construirlo (reutilizando `SupabaseStorageClient` para subir el comprobante).
 
+## 9. Adenda — Fase 8: corrección de fondo en la elegibilidad de comisiones de referido
+
+**Esto reemplaza por completo §7.2 y la adenda de la Fase 6.** El diseño
+original pagaba la comisión completa a cualquier referente con *al menos una
+compra confirmada de cualquier tipo* (Driver o Zenith), con un mecanismo de
+espera/reintento si todavía no calificaba. El cliente aclaró que esa regla
+estaba mal — la real es:
+
+### 9.1 Comisión por venta de Driver
+
+Solo se paga si el referente **tiene una posición Driver propia ACTIVA**
+(con cashback pendiente) **en el momento exacto** en que se confirma la
+compra del referido:
+
+- Se aplica como avance a esa posición (`cashback_paid`/`cashback_remaining`),
+  tope = lo que le quede pendiente al referente.
+- Lo que exceda ese tope **se pierde** — a propósito. No se reasigna a otra
+  posición del referente, ni se paga directo a `available_balance` (a
+  diferencia del rendimiento mensual, que sí cascada entre posiciones).
+- Si el referente no tiene **ninguna** posición Driver activa (nunca compró
+  Driver, o ya completó el cashback de todas sus posiciones), **toda** la
+  comisión se pierde.
+
+### 9.2 Comisión por venta de Zenith
+
+Solo se paga si el referente tiene una **licencia Zenith propia con status
+ACTIVE** (no `EXPIRED`) en el momento exacto de la confirmación. Si califica,
+se paga **completa y directa** a `available_balance` — Zenith no tiene
+cashback, así que aquí no hay tope ni reparto, es una verificación binaria.
+Si no califica, toda la comisión se pierde.
+
+### 9.3 Sin reintentos — evaluación única
+
+La comisión se evalúa **una sola vez**, en el instante en que se confirma la
+compra del referido. Si el referente no califica en ese momento exacto, la
+comisión se pierde **para siempre** — aunque compre el plan que le faltaba
+cinco minutos después. Por esto, el disparador `onReferrerPurchaseConfirmed`
+(que re-evaluaba referrals pendientes cuando el referente finalmente
+calificaba) **se eliminó por completo**, junto con el estado
+`QUALIFIED_AWAITING_REFERRER` (que queda en el `CHECK` de la base solo por
+compatibilidad con filas históricas — el código nuevo nunca vuelve a
+escribirlo). El nuevo estado terminal es `RESOLVED`: significa "ya se evaluó
+esta compra", sin indicar por sí solo si se pagó, se pagó parcial, o se
+perdió — eso vive en `cashback_transactions` (lo que sí se pagó) y
+`audit_logs` (acción `REFERRAL_COMMISSION_FORFEITED_*`, lo que se perdió y
+por qué).
+
+### 9.4 Cada compra del referido se evalúa de forma independiente
+
+Si la misma persona referida compra **ambos** planes (Driver y Zenith, en
+cualquier orden), cada venta dispara su propia evaluación contra el plan
+correspondiente del referente. Esto significa que, si el referente es
+propietario de ambos planes, puede cobrar **ambas** comisiones de forma
+independiente — no es "una comisión por relación de referido" como se
+asumió (sin confirmar) en la adenda de la Fase 6; el supuesto #4 de esa
+adenda queda sin efecto.
+
+### 9.5 Cambios de esquema
+
+`V18__referral_commission_eligibility_rules.sql` extiende el `CHECK` de
+`referrals.status` para permitir `'RESOLVED'`, sin tocar ni eliminar los
+valores históricos (`QUALIFIED_AWAITING_REFERRER`, `BONUS_PAID`).
+
+
 

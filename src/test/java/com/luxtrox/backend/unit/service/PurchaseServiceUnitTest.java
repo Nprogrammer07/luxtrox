@@ -200,7 +200,6 @@ class PurchaseServiceUnitTest {
         assertThat(user.getTotalPackagesPurchased()).isEqualTo(5); // 2 + 3
         verify(zenithLicenseRepository, never()).save(any());
         verify(referralService).onReferredPurchaseConfirmed(purchase);
-        verify(referralService).onReferrerPurchaseConfirmed(user);
     }
 
     @Test

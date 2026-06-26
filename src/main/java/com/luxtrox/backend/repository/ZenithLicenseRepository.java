@@ -11,4 +11,5 @@ public interface ZenithLicenseRepository extends JpaRepository<ZenithLicense, UU
     List<ZenithLicense> findByUser(User user);
     List<ZenithLicense> findByStatus(ZenithLicenseStatus status);
     boolean existsByUser(User user);
+    boolean existsByUserAndStatus(User user, ZenithLicenseStatus status);
 }

@@ -7,11 +7,14 @@ import java.util.UUID;
 
 /**
  * Un registro por usuario referido (unique referred_user_id). La
- * comision (9% Driver / 40% Zenith, ver docs/domain-model.md 7.2)
- * solo se paga cuando referente Y referido cumplen sus condiciones --
- * puede quedar QUALIFIED_AWAITING_REFERRER si el referente todavia no
- * tiene NINGUNA compra confirmada (ni Driver ni Zenith). La logica de
- * transicion vive en ReferralService, esta clase es solo el dato.
+ * comision se evalua y resuelve UNA SOLA VEZ por cada compra del
+ * referido, en el momento exacto en que se confirma -- sin reintentos
+ * (ver docs/domain-model.md adenda de Fase 8, que corrige por
+ * completo el diseno original de la Fase 6). targetPosition,
+ * triggeringPurchase y bonusPaidAt solo conservan el snapshot de la
+ * evaluacion MAS RECIENTE -- el historial completo (pagado, parcial,
+ * o perdido) vive en cashback_transactions y audit_logs. La logica de
+ * resolucion vive en ReferralService, esta clase es solo el dato.
  */
 @Entity
 @Table(name = "referrals")

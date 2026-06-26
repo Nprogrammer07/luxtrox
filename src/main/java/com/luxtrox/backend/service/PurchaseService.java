@@ -158,13 +158,9 @@ public class PurchaseService {
         generateInvoiceAndNotify(purchase);
 
         // El comprador puede ser un REFERIDO de alguien -- evalua y
-        // paga esa comision si corresponde.
+        // resuelve esa comision de inmediato (pagada, parcial, o
+        // perdida -- sin reintentos, ver ReferralService).
         referralService.onReferredPurchaseConfirmed(purchase);
-
-        // Esta puede ser la primera compra confirmada del comprador
-        // -- si el mismo tiene referidos pendientes esperando a que
-        // el calificara, esto los re-evalua y paga.
-        referralService.onReferrerPurchaseConfirmed(user);
 
         return purchase;
     }

@@ -4,8 +4,8 @@ import com.luxtrox.backend.entity.*;
 import com.luxtrox.backend.entity.enums.CashbackTransactionType;
 import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PositionStatus;
-import com.luxtrox.backend.entity.enums.PurchaseStatus;
 import com.luxtrox.backend.entity.enums.ReferralStatus;
+import com.luxtrox.backend.entity.enums.ZenithLicenseStatus;
 import com.luxtrox.backend.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,55 +13,62 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Optional;
 
 /**
- * Implementa el algoritmo de comisiones de referido descrito en
- * docs/domain-model.md §7.2 (adenda de Fase 6 -- reemplaza por
- * completo el bono fijo de $100 original de §4.2).
+ * Implementa el algoritmo de comisiones de referido -- VERSION
+ * CORREGIDA (ver docs/domain-model.md adenda de Fase 8). Reemplaza
+ * por completo el diseno anterior (Fase 6), que pagaba la comision
+ * completa a cualquier referente con AL MENOS UNA compra confirmada
+ * de cualquier tipo, con reintento si todavia no calificaba.
  *
- * Elegibilidad: cualquier compra CONFIRMADA del referente, Driver o
- * Zenith (no es necesario haber comprado Driver especificamente).
- *
- * Pago: la comision SIEMPRE se paga completa al available_balance del
- * referente. Si tiene una posicion Driver activa con saldo pendiente,
- * lo que cabe ahi tambien se contabiliza como avance de esa posicion
- * (cashback_paid/cashback_remaining); lo que no cabe (o el monto
- * completo si no hay posicion) se registra como
- * REFERRAL_BONUS_DIRECT, sin posicion asociada.
+ * Regla real del negocio (aclarada por el cliente):
+ *   - Comision por venta de DRIVER: solo se paga si el referente tiene
+ *     una posicion Driver propia ACTIVA (cashback pendiente). Se
+ *     aplica como avance a esa posicion, tope = lo que le quede
+ *     pendiente -- lo que exceda esa capacidad SE PIERDE (no hay
+ *     pago directo a balance para Driver). Si no tiene ninguna
+ *     posicion activa, TODA la comision se pierde.
+ *   - Comision por venta de ZENITH: se paga completa y directa a
+ *     available_balance, solo si el referente tiene una licencia
+ *     Zenith ACTIVE en este momento. Si no, se pierde completa.
+ *   - La evaluacion es UNICA: en el momento exacto en que se confirma
+ *     la compra del referido. Sin reintentos, sin espera -- si el
+ *     referente no califica en ese instante, la comision se pierde
+ *     para siempre. Por eso ya NO existe un disparador equivalente a
+ *     "onReferrerPurchaseConfirmed".
+ *   - Cada compra del referido se evalua de forma INDEPENDIENTE: si
+ *     refiere tanto un Driver como un Zenith, cada venta genera su
+ *     propia evaluacion contra el plan correspondiente del referente.
  */
 @Service
 public class ReferralService {
 
     private final ReferralRepository referralRepository;
     private final UserRepository userRepository;
-    private final PurchaseRepository purchaseRepository;
     private final InvestmentPositionRepository positionRepository;
+    private final ZenithLicenseRepository zenithLicenseRepository;
     private final CashbackTransactionRepository cashbackTransactionRepository;
     private final AuditService auditService;
     private final NotificationEmailService notificationEmailService;
 
     public ReferralService(ReferralRepository referralRepository,
                             UserRepository userRepository,
-                            PurchaseRepository purchaseRepository,
                             InvestmentPositionRepository positionRepository,
+                            ZenithLicenseRepository zenithLicenseRepository,
                             CashbackTransactionRepository cashbackTransactionRepository,
                             AuditService auditService,
                             NotificationEmailService notificationEmailService) {
         this.referralRepository = referralRepository;
         this.userRepository = userRepository;
-        this.purchaseRepository = purchaseRepository;
         this.positionRepository = positionRepository;
+        this.zenithLicenseRepository = zenithLicenseRepository;
         this.cashbackTransactionRepository = cashbackTransactionRepository;
         this.auditService = auditService;
         this.notificationEmailService = notificationEmailService;
     }
 
-    /**
-     * Calcula la comision segun el plan comprado (ver §7.2):
-     * Driver = 9% del precio, Zenith = 40% del precio.
-     */
+    /** Driver = 9% del precio, Zenith = 40% del precio -- sin cambios respecto al diseno original. */
     public BigDecimal calculateCommission(Purchase referredPurchase) {
         BigDecimal rate = referredPurchase.getPlanType() == PlanType.DRIVER
                 ? PlanPricing.DRIVER_REFERRAL_RATE
@@ -72,9 +79,8 @@ public class ReferralService {
     }
 
     /**
-     * Disparador 1: la compra del REFERIDO se confirma. Si el
-     * comprador tiene un referente (referredBy), marca su Referral
-     * como calificado e intenta pagar de inmediato.
+     * Unico disparador que queda: la compra del REFERIDO se confirma.
+     * Evalua y resuelve la comision DE INMEDIATO, sin reintentos.
      */
     @Transactional
     public void onReferredPurchaseConfirmed(Purchase confirmedPurchase) {
@@ -87,61 +93,33 @@ public class ReferralService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Usuario " + referredUser.getId() + " tiene referredBy pero no existe su Referral"));
 
-        // El bono es un evento UNICO por relacion de referido (ver
-        // docs/domain-model.md 7.2) -- si el mismo referido hace una
-        // segunda compra mas adelante (p.ej. Driver y luego Zenith),
-        // eso no debe generar una segunda comision para el referente.
-        if (referral.getStatus() == ReferralStatus.BONUS_PAID) {
-            return;
-        }
-
         if (referral.getQualifiedAt() == null) {
             referral.setQualifiedAt(OffsetDateTime.now());
-            // Se guarda la compra exacta que califica -- es lo que
-            // permite saber, incluso si el pago se reintenta despues
-            // (disparador 2), si la comision es 9% o 40% sin tener
-            // que adivinar "la mas reciente" del referido.
-            referral.setTriggeringPurchase(confirmedPurchase);
+        }
+        // Nota: si el mismo referido compra mas de un plan, este campo
+        // (y targetPosition mas abajo) solo conserva el snapshot de la
+        // evaluacion MAS RECIENTE -- el historial real, completo, vive
+        // en cashback_transactions y audit_logs, que son append-only.
+        referral.setTriggeringPurchase(confirmedPurchase);
+
+        if (confirmedPurchase.getPlanType() == PlanType.DRIVER) {
+            resolveDriverCommission(referral, confirmedPurchase);
+        } else {
+            resolveZenithCommission(referral, confirmedPurchase);
         }
 
-        attemptToPay(referral, confirmedPurchase);
+        referral.setStatus(ReferralStatus.RESOLVED);
+        referralRepository.save(referral);
     }
 
     /**
-     * Disparador 2: la compra del REFERENTE se confirma (puede ser su
-     * primera compra de cualquier tipo). Re-evalua todos sus
-     * referidos que estaban esperando porque el todavia no calificaba.
+     * Tope = lo que le quede pendiente al referente en su posicion
+     * Driver activa mas reciente. El excedente sobre ese tope SE
+     * PIERDE -- a proposito, no se reasigna a otra posicion ni se
+     * paga directo a balance (a diferencia del rendimiento mensual,
+     * que si cascada entre posiciones).
      */
-    @Transactional
-    public void onReferrerPurchaseConfirmed(User referrer) {
-        List<Referral> pending = referralRepository.findByReferrerAndStatus(
-                referrer, ReferralStatus.QUALIFIED_AWAITING_REFERRER);
-
-        for (Referral referral : pending) {
-            Purchase triggeringPurchase = referral.getTriggeringPurchase();
-            if (triggeringPurchase == null) {
-                throw new IllegalStateException(
-                        "Referral " + referral.getId() + " esta QUALIFIED_AWAITING_REFERRER "
-                                + "sin triggering_purchase_id -- inconsistencia de datos");
-            }
-            attemptToPay(referral, triggeringPurchase);
-        }
-    }
-
-    private void attemptToPay(Referral referral, Purchase referredPurchase) {
-        User referrer = referral.getReferrer();
-        boolean referrerIsEligible = purchaseRepository.existsByUserAndStatus(referrer, PurchaseStatus.CONFIRMED);
-
-        if (!referrerIsEligible) {
-            referral.setStatus(ReferralStatus.QUALIFIED_AWAITING_REFERRER);
-            referralRepository.save(referral);
-            return;
-        }
-
-        payBonus(referral, referredPurchase);
-    }
-
-    private void payBonus(Referral referral, Purchase referredPurchase) {
+    private void resolveDriverCommission(Referral referral, Purchase referredPurchase) {
         User referrer = referral.getReferrer();
         BigDecimal commission = calculateCommission(referredPurchase);
 
@@ -151,60 +129,85 @@ public class ReferralService {
                 .stream()
                 .findFirst();
 
-        BigDecimal remainder = commission;
-
-        if (destino.isPresent()) {
-            InvestmentPosition position = destino.get();
-            BigDecimal applied = commission.min(position.getCashbackRemaining());
-
-            BigDecimal oldPaid = position.getCashbackPaid();
-            BigDecimal oldRemaining = position.getCashbackRemaining();
-
-            position.setCashbackPaid(position.getCashbackPaid().add(applied));
-            position.setCashbackRemaining(position.getCashbackRemaining().subtract(applied));
-            if (position.getCashbackRemaining().compareTo(BigDecimal.ZERO) == 0) {
-                position.setStatus(PositionStatus.COMPLETED);
-                position.setCompletedAt(OffsetDateTime.now());
-            }
-            positionRepository.save(position);
-
-            CashbackTransaction advanceTx = new CashbackTransaction(
-                    position, CashbackTransactionType.REFERRAL_BONUS, applied);
-            advanceTx.setSourceReferral(referral);
-            cashbackTransactionRepository.save(advanceTx);
-
-            auditService.record(referrer, "InvestmentPosition", position.getId(), "REFERRAL_BONUS_APPLIED",
-                    new Object[]{oldPaid, oldRemaining},
-                    new Object[]{position.getCashbackPaid(), position.getCashbackRemaining()});
-
-            remainder = commission.subtract(applied);
-            referral.setTargetPosition(position);
+        if (destino.isEmpty()) {
+            forfeitCommission(referrer, commission, "DRIVER_SIN_POSICION_ACTIVA");
+            return;
         }
 
-        if (remainder.compareTo(BigDecimal.ZERO) > 0) {
-            CashbackTransaction directTx = new CashbackTransaction(referrer, remainder);
-            directTx.setSourceReferral(referral);
-            cashbackTransactionRepository.save(directTx);
+        InvestmentPosition position = destino.get();
+        BigDecimal applied = commission.min(position.getCashbackRemaining());
+        BigDecimal lost = commission.subtract(applied);
+
+        BigDecimal oldPaid = position.getCashbackPaid();
+        BigDecimal oldRemaining = position.getCashbackRemaining();
+        position.setCashbackPaid(position.getCashbackPaid().add(applied));
+        position.setCashbackRemaining(position.getCashbackRemaining().subtract(applied));
+        if (position.getCashbackRemaining().compareTo(BigDecimal.ZERO) == 0) {
+            position.setStatus(PositionStatus.COMPLETED);
+            position.setCompletedAt(OffsetDateTime.now());
+        }
+        positionRepository.save(position);
+
+        CashbackTransaction tx = new CashbackTransaction(position, CashbackTransactionType.REFERRAL_BONUS, applied);
+        tx.setSourceReferral(referral);
+        cashbackTransactionRepository.save(tx);
+
+        auditService.record(referrer, "InvestmentPosition", position.getId(), "REFERRAL_BONUS_APPLIED",
+                new Object[]{oldPaid, oldRemaining},
+                new Object[]{position.getCashbackPaid(), position.getCashbackRemaining()});
+
+        referral.setTargetPosition(position);
+        creditBalanceAndNotify(referrer, applied, referral);
+
+        if (lost.compareTo(BigDecimal.ZERO) > 0) {
+            forfeitCommission(referrer, lost, "DRIVER_EXCEEDS_REMAINING");
+        }
+    }
+
+    /**
+     * Zenith no tiene cashback -- por eso aqui no hay tope ni
+     * reparto, solo una verificacion binaria (licencia ACTIVE o no) y
+     * el pago directo y completo si corresponde.
+     */
+    private void resolveZenithCommission(Referral referral, Purchase referredPurchase) {
+        User referrer = referral.getReferrer();
+        BigDecimal commission = calculateCommission(referredPurchase);
+
+        boolean hasActiveZenith = zenithLicenseRepository.existsByUserAndStatus(referrer, ZenithLicenseStatus.ACTIVE);
+        if (!hasActiveZenith) {
+            forfeitCommission(referrer, commission, "ZENITH_SIN_LICENCIA_ACTIVA");
+            return;
         }
 
+        CashbackTransaction tx = new CashbackTransaction(referrer, commission);
+        tx.setSourceReferral(referral);
+        cashbackTransactionRepository.save(tx);
+
+        creditBalanceAndNotify(referrer, commission, referral);
+    }
+
+    private void creditBalanceAndNotify(User referrer, BigDecimal amount, Referral referral) {
         BigDecimal oldBalance = referrer.getAvailableBalance();
-        referrer.setAvailableBalance(referrer.getAvailableBalance().add(commission));
+        referrer.setAvailableBalance(referrer.getAvailableBalance().add(amount));
         userRepository.save(referrer);
 
         auditService.record(referrer, "User", referrer.getId(), "REFERRAL_COMMISSION_PAID",
                 oldBalance, referrer.getAvailableBalance());
 
-        referral.setStatus(ReferralStatus.BONUS_PAID);
         referral.setBonusPaidAt(OffsetDateTime.now());
-        referralRepository.save(referral);
+        notifyReferrerQuietly(referrer, amount);
+    }
 
-        notifyReferrerQuietly(referrer, commission);
+    /** Ninguna transaccion de dinero -- solo queda registro en audit_logs para soporte/trazabilidad. */
+    private void forfeitCommission(User referrer, BigDecimal amountLost, String reason) {
+        auditService.recordSystemAction("User", referrer.getId(), "REFERRAL_COMMISSION_FORFEITED_" + reason,
+                null, amountLost);
     }
 
     /**
-     * Igual patron que PurchaseService/WithdrawalService: un fallo de
-     * Resend nunca debe tumbar el pago de la comision, que ya quedo
-     * correcto antes de llegar aqui.
+     * Igual patron que el resto de los servicios: un fallo de Resend
+     * nunca debe tumbar el pago de la comision, que ya quedo correcto
+     * antes de llegar aqui.
      */
     private void notifyReferrerQuietly(User referrer, BigDecimal commission) {
         try {
