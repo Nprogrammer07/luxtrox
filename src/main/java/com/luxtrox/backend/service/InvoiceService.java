@@ -9,7 +9,6 @@ import com.luxtrox.backend.entity.Purchase;
 import com.luxtrox.backend.integration.storage.SupabaseStorageClient;
 import com.luxtrox.backend.repository.InvoiceRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.time.format.DateTimeFormatter;
@@ -34,7 +33,22 @@ public class InvoiceService {
         this.storageClient = storageClient;
     }
 
-    @Transactional
+    /**
+     * A PROPOSITO sin @Transactional: esto se llama siempre desde
+     * dentro de PurchaseService.confirmPurchase() (que SI es
+     * transaccional) envuelto en su propio try/catch -- si este
+     * metodo FUERA @Transactional y storageClient.uploadFile()
+     * fallara (ej. Storage caido), Spring marcaria la transaccion
+     * COMPARTIDA con el llamador como rollback-only ANTES de que el
+     * try/catch del llamador llegue a atraparla. El resultado: la
+     * excepcion queda "atrapada" pero la transaccion ya esta
+     * envenenada, y el commit final de confirmPurchase() explota con
+     * UnexpectedRollbackException (un 500 que no deberia pasar, ya
+     * que la compra en si se confirmo bien). Sin @Transactional aqui,
+     * un fallo de storage es un RuntimeException comun que el
+     * try/catch del llamador atrapa limpio, sin tocar ninguna
+     * transaccion.
+     */
     public Invoice generateAndStore(Purchase purchase) {
         return generateStoreAndReturnBytes(purchase).invoice();
     }
@@ -47,7 +61,6 @@ public class InvoiceService {
     public record InvoiceWithBytes(Invoice invoice, byte[] pdfBytes) {
     }
 
-    @Transactional
     public InvoiceWithBytes generateStoreAndReturnBytes(Purchase purchase) {
         String invoiceNumber = generateInvoiceNumber(purchase);
         byte[] pdfBytes = renderPdf(purchase, invoiceNumber);

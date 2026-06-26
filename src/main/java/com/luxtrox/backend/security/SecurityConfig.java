@@ -1,5 +1,6 @@
 package com.luxtrox.backend.security;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,17 +34,17 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final JwtService jwtService;
     private final CustomUserDetailsService userDetailsService;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+    public SecurityConfig(JwtService jwtService,
                            CustomUserDetailsService userDetailsService,
                            PasswordEncoder passwordEncoder) {
-        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.jwtService = jwtService;
         this.userDetailsService = userDetailsService;
         this.passwordEncoder = passwordEncoder;
     }
@@ -54,11 +55,34 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // Sin esto, Spring Security usa Http403ForbiddenEntryPoint
+            // por defecto para CUALQUIER acceso sin autenticar -- 403
+            // en vez del 401 convencional. accessDeniedHandler queda
+            // explicito tambien (aunque su default ya era 403) para
+            // que ninguno de los dos casos depender de un default
+            // implicito.
+            .exceptionHandling(exceptions -> exceptions
+                    .authenticationEntryPoint((request, response, authException) ->
+                            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "No autenticado"))
+                    .accessDeniedHandler((request, response, accessDeniedException) ->
+                            response.sendError(HttpServletResponse.SC_FORBIDDEN, "No autorizado")))
             .authorizeHttpRequests(auth -> auth
                 // Publico: registro/login/refresh y documentacion.
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/docs/**", "/api-docs/**", "/swagger-ui/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // Spring Boot reenvia internamente a /error cuando se
+                // llama sendError() (lo que hacen authenticationEntryPoint
+                // y accessDeniedHandler de aqui abajo). JwtAuthenticationFilter
+                // se autoexcluye de ese forward (OncePerRequestFilter,
+                // shouldNotFilterErrorDispatch() = true por defecto), asi
+                // que sin esto /error vuelve a pasar por la cadena SIN
+                // autenticar, cae en anyRequest().authenticated(), y
+                // pisa el codigo de estado original con un 401 -- esto
+                // es lo que causaba que un 403 real (rol insuficiente)
+                // le llegara al cliente como 401 (encontrado con
+                // @EnableWebSecurity(debug=true) en la Fase 8).
+                .requestMatchers("/error").permitAll()
                 // Callbacks de proveedores externos (NOWPayments) -- no
                 // mandan JWT, se autentican con su propia firma HMAC
                 // (ver NowPaymentsSignatureVerifier). El controller
@@ -73,7 +97,10 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .authenticationProvider(authenticationProvider())
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            // Construido aqui DIRECTAMENTE (new, no inyectado) -- ver
+            // el comentario de la clase para el porque exacto.
+            .addFilterBefore(new JwtAuthenticationFilter(jwtService, userDetailsService),
+                    UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

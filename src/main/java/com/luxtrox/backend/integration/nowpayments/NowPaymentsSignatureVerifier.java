@@ -55,7 +55,7 @@ public class NowPaymentsSignatureVerifier {
         }
     }
 
-    String computeSignature(String rawJsonBody, String ipnSecret)
+    public String computeSignature(String rawJsonBody, String ipnSecret)
             throws NoSuchAlgorithmException, InvalidKeyException {
         try {
             JsonNode tree = objectMapper.readTree(rawJsonBody);

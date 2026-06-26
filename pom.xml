@@ -140,6 +140,18 @@
             <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            Fase 8: tests de API de punta a punta (HTTP real y
+            seguridad, no solo el service layer). 5.5.7, NO 6.0.0:
+            esa version sube la base a Spring 7 / Jackson 3, que no
+            es lo que trae Spring Boot 3.3.5 (Spring 6 / Jackson 2).
+        -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>5.5.7</version>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Integraciones externas (Fase 7) -->
         <!-- Cliente S3, usado contra Supabase Storage (S3-compatible),
