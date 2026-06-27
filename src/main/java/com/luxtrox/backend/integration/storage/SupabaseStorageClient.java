@@ -1,5 +1,6 @@
 package com.luxtrox.backend.integration.storage;
 
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -20,8 +21,23 @@ import java.net.URI;
  * forcePathStyle=true es OBLIGATORIO para Supabase -- sin esto, el SDK
  * intenta resolver un estilo de URL "virtual-hosted" (bucket.endpoint)
  * que Supabase no soporta.
+ *
+ * @Lazy a proposito: si app.storage.endpoint queda vacio (Fase 9 lo
+ * permite -- el health indicator lo reporta DOWN sin tumbar el resto
+ * de la app), URI.create("") + S3Client.builder().endpointOverride(...)
+ * lanza NullPointerException ("URI scheme... must not be null")
+ * DENTRO del constructor. Sin @Lazy, Spring construye este bean
+ * EAGER al arrancar (porque PurchaseService/InvoiceService lo
+ * inyectan), y esa excepcion tumba TODA la aplicacion -- justo lo que
+ * el diseno de Fase 9 queria evitar (encontrado al correr la imagen
+ * de Docker con Storage sin configurar). Con @Lazy, Spring inyecta un
+ * proxy y el constructor real solo corre la PRIMERA VEZ que algo
+ * llama uploadFile/downloadFile -- si eso falla, ya esta dentro del
+ * try/catch de generateInvoiceAndNotify en PurchaseService, que no
+ * tumba la confirmacion de la compra.
  */
 @Component
+@Lazy
 public class SupabaseStorageClient {
 
     private final S3Client s3Client;

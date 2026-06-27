@@ -77,3 +77,28 @@ protegido con el header `Authorization: Bearer <token>`.
 Si el paso 3 falla, pégame el error completo de la consola — probablemente sea un
 desajuste entre alguna entidad y la tabla real, y lo corregimos igual que hicimos con
 la conexión de Supabase.
+
+## 6. Alternativa: con Docker (Fase 10)
+
+Todo lo de arriba conecta a tu Supabase real. Si prefieres algo totalmente
+autocontenido (sin necesitar credenciales de Supabase todavía — útil para una demo
+rápida, o para alguien que recién se une al proyecto), existe `docker-compose.yml` en
+la raíz, que levanta el backend **y** un Postgres local juntos:
+
+```bash
+cp .env.example .env
+# edita .env: como minimo necesitas JWT_SECRET con algo random de 32+ caracteres
+docker compose up --build
+```
+
+Esto aplica las migraciones de Flyway contra el Postgres local automáticamente al
+arrancar (mismo comportamiento que contra Supabase). Las integraciones externas
+(NOWPayments, Resend, Storage) pueden quedar vacías en `.env` — el backend arranca
+igual, y `http://localhost:8080/actuator/health` (con un token de ADMIN) te muestra
+exactamente cuáles quedaron sin configurar (ver Fase 9, health checks).
+
+Para construir solo la imagen, sin levantar nada:
+
+```bash
+docker build -t luxtrox-backend .
+```
