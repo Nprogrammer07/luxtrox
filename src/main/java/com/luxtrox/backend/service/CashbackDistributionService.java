@@ -12,6 +12,8 @@ import com.luxtrox.backend.repository.CashbackTransactionRepository;
 import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.MonthlyPerformanceRepository;
 import com.luxtrox.backend.repository.UserRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,17 +45,20 @@ public class CashbackDistributionService {
     private final CashbackTransactionRepository cashbackTransactionRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final MeterRegistry meterRegistry;
 
     public CashbackDistributionService(MonthlyPerformanceRepository performanceRepository,
                                         InvestmentPositionRepository positionRepository,
                                         CashbackTransactionRepository cashbackTransactionRepository,
                                         UserRepository userRepository,
-                                        AuditService auditService) {
+                                        AuditService auditService,
+                                        MeterRegistry meterRegistry) {
         this.performanceRepository = performanceRepository;
         this.positionRepository = positionRepository;
         this.cashbackTransactionRepository = cashbackTransactionRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -81,6 +86,12 @@ public class CashbackDistributionService {
             return; // ya se aplico -- idempotencia
         }
 
+        // El sample arranca DESPUES del chequeo de idempotencia a
+        // proposito -- un run que no hizo nada (porque ya se habia
+        // aplicado) no deberia contar como una distribucion real para
+        // efectos de esta metrica.
+        Timer.Sample sample = Timer.start(meterRegistry);
+
         BigDecimal rate = performance.getPercentage().divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
 
         List<InvestmentPosition> activePositions =
@@ -92,6 +103,10 @@ public class CashbackDistributionService {
 
         performance.setAppliedAt(OffsetDateTime.now());
         performanceRepository.save(performance);
+
+        sample.stop(Timer.builder("luxtrox.cashback.distribution")
+                .description("Duracion de una distribucion de rendimiento mensual completa")
+                .register(meterRegistry));
     }
 
     /**

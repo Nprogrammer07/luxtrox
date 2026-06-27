@@ -10,6 +10,8 @@ import com.luxtrox.backend.repository.BankWithdrawalDetailRepository;
 import com.luxtrox.backend.repository.CryptoWithdrawalDetailRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.repository.WithdrawalRequestRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,19 +36,22 @@ public class WithdrawalService {
     private final UserRepository userRepository;
     private final AuditService auditService;
     private final NotificationEmailService notificationEmailService;
+    private final MeterRegistry meterRegistry;
 
     public WithdrawalService(WithdrawalRequestRepository withdrawalRequestRepository,
                               CryptoWithdrawalDetailRepository cryptoDetailRepository,
                               BankWithdrawalDetailRepository bankDetailRepository,
                               UserRepository userRepository,
                               AuditService auditService,
-                              NotificationEmailService notificationEmailService) {
+                              NotificationEmailService notificationEmailService,
+                              MeterRegistry meterRegistry) {
         this.withdrawalRequestRepository = withdrawalRequestRepository;
         this.cryptoDetailRepository = cryptoDetailRepository;
         this.bankDetailRepository = bankDetailRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.notificationEmailService = notificationEmailService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -88,6 +93,12 @@ public class WithdrawalService {
         auditService.record(user, "WithdrawalRequest", request.getId(), "REQUESTED",
                 null, request.getStatus());
 
+        Counter.builder("luxtrox.withdrawals.requested")
+                .description("Retiros solicitados, por tipo")
+                .tag("type", type.name())
+                .register(meterRegistry)
+                .increment();
+
         return request;
     }
 
@@ -102,6 +113,7 @@ public class WithdrawalService {
 
         auditService.record(admin, "WithdrawalRequest", request.getId(), "APPROVED",
                 WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED);
+        meterRegistry.counter("luxtrox.withdrawals.approved").increment();
         notifyStatusChangeQuietly(request, "Aprobado");
         return request;
     }
@@ -126,6 +138,7 @@ public class WithdrawalService {
                 WithdrawalStatus.REQUESTED, WithdrawalStatus.REJECTED);
         auditService.record(user, "User", user.getId(), "WITHDRAWAL_REJECTED_BALANCE_REFUNDED",
                 oldBalance, user.getAvailableBalance());
+        meterRegistry.counter("luxtrox.withdrawals.rejected").increment();
         notifyStatusChangeQuietly(request, "Rechazado");
 
         return request;
@@ -146,6 +159,12 @@ public class WithdrawalService {
 
         auditService.record(admin, "WithdrawalRequest", request.getId(), "PAID",
                 WithdrawalStatus.APPROVED, WithdrawalStatus.PAID);
+
+        Counter.builder("luxtrox.withdrawals.paid")
+                .description("Total en dolares efectivamente pagado en retiros")
+                .register(meterRegistry)
+                .increment(request.getAmount().doubleValue());
+
         notifyStatusChangeQuietly(request, "Pagado");
         return request;
     }

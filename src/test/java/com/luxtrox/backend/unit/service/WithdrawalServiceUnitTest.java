@@ -15,6 +15,8 @@ import com.luxtrox.backend.repository.WithdrawalRequestRepository;
 import com.luxtrox.backend.service.AuditService;
 import com.luxtrox.backend.service.NotificationEmailService;
 import com.luxtrox.backend.service.WithdrawalService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,13 +48,15 @@ class WithdrawalServiceUnitTest {
     @Mock private NotificationEmailService notificationEmailService;
 
     private WithdrawalService service;
+    private MeterRegistry meterRegistry;
     private User user;
     private User admin;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         service = new WithdrawalService(withdrawalRequestRepository, cryptoDetailRepository,
-                bankDetailRepository, userRepository, auditService, notificationEmailService);
+                bankDetailRepository, userRepository, auditService, notificationEmailService, meterRegistry);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
@@ -94,6 +98,9 @@ class WithdrawalServiceUnitTest {
         assertThat(user.getAvailableBalance()).isEqualByComparingTo("400.00"); // 500 - 100
         verify(cryptoDetailRepository).save(any());
         verify(userRepository).save(user);
+
+        assertThat(meterRegistry.get("luxtrox.withdrawals.requested").tag("type", "CRYPTO")
+                .counter().count()).isEqualTo(1.0);
     }
 
     @Test
@@ -221,6 +228,8 @@ class WithdrawalServiceUnitTest {
         assertThat(result.getStatus()).isEqualTo(WithdrawalStatus.PAID);
         assertThat(result.getPaidAt()).isNotNull();
         verify(notificationEmailService).sendWithdrawalStatusChangedEmail(request, "Pagado");
+
+        assertThat(meterRegistry.get("luxtrox.withdrawals.paid").counter().count()).isEqualTo(100.00);
     }
 
     @Test

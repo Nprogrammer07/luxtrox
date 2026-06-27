@@ -6,6 +6,8 @@ import com.luxtrox.backend.repository.*;
 import com.luxtrox.backend.service.AuditService;
 import com.luxtrox.backend.service.NotificationEmailService;
 import com.luxtrox.backend.service.ReferralService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,14 +45,17 @@ class ReferralServiceUnitTest {
     @Mock private NotificationEmailService notificationEmailService;
 
     private ReferralService service;
+    private MeterRegistry meterRegistry;
     private Role role;
     private User referrer;
     private User referred;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         service = new ReferralService(referralRepository, userRepository, positionRepository,
-                zenithLicenseRepository, cashbackTransactionRepository, auditService, notificationEmailService);
+                zenithLicenseRepository, cashbackTransactionRepository, auditService, notificationEmailService,
+                meterRegistry);
 
         role = new Role("USER", "Usuario estandar");
         referrer = new User("Referente", "referente@example.com", "+1", "hash", role, "REFA0001");
@@ -148,9 +153,10 @@ class ReferralServiceUnitTest {
         ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
         verify(referralRepository).save(referralCaptor.capture());
         assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED);
-    }
 
-    // ---------- DRIVER: comision excede lo pendiente -- el exceso SE PIERDE ----------
+        assertThat(meterRegistry.get("luxtrox.referral.commission.paid").tag("planType", "DRIVER")
+                .counter().count()).isEqualTo(98.91);
+    }
 
     @Test
     void driverSale_commissionExceedsRemainingCashback_excessIsForfeitedNotPaidElsewhere() {
@@ -205,6 +211,9 @@ class ReferralServiceUnitTest {
         ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
         verify(referralRepository).save(referralCaptor.capture());
         assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED); // se evaluo, aunque no se pago
+
+        assertThat(meterRegistry.get("luxtrox.referral.commission.forfeited")
+                .tag("reason", "DRIVER_SIN_POSICION_ACTIVA").counter().count()).isEqualTo(98.91);
     }
 
     // ---------- ZENITH: con licencia ACTIVE ----------

@@ -13,6 +13,8 @@ import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.repository.ZenithLicenseRepository;
 import com.luxtrox.backend.service.*;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,13 +50,15 @@ class PurchaseServiceUnitTest {
     @Mock private NotificationEmailService notificationEmailService;
 
     private PurchaseService purchaseService;
+    private MeterRegistry meterRegistry;
     private User user;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         purchaseService = new PurchaseService(purchaseRepository, userRepository, positionRepository,
                 zenithLicenseRepository, referralService, auditService, nowPaymentsClient,
-                invoiceService, notificationEmailService);
+                invoiceService, notificationEmailService, meterRegistry);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
@@ -200,6 +204,9 @@ class PurchaseServiceUnitTest {
         assertThat(user.getTotalPackagesPurchased()).isEqualTo(5); // 2 + 3
         verify(zenithLicenseRepository, never()).save(any());
         verify(referralService).onReferredPurchaseConfirmed(purchase);
+
+        assertThat(meterRegistry.get("luxtrox.purchases.confirmed").tag("planType", "DRIVER").counter().count())
+                .isEqualTo(1.0);
     }
 
     @Test

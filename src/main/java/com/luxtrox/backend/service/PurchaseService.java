@@ -12,6 +12,8 @@ import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.repository.ZenithLicenseRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,7 @@ public class PurchaseService {
     private final NowPaymentsClient nowPaymentsClient;
     private final InvoiceService invoiceService;
     private final NotificationEmailService notificationEmailService;
+    private final MeterRegistry meterRegistry;
 
     public PurchaseService(PurchaseRepository purchaseRepository,
                             UserRepository userRepository,
@@ -51,7 +54,8 @@ public class PurchaseService {
                             AuditService auditService,
                             NowPaymentsClient nowPaymentsClient,
                             InvoiceService invoiceService,
-                            NotificationEmailService notificationEmailService) {
+                            NotificationEmailService notificationEmailService,
+                            MeterRegistry meterRegistry) {
         this.purchaseRepository = purchaseRepository;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
@@ -61,6 +65,7 @@ public class PurchaseService {
         this.nowPaymentsClient = nowPaymentsClient;
         this.invoiceService = invoiceService;
         this.notificationEmailService = notificationEmailService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -154,6 +159,12 @@ public class PurchaseService {
 
         auditService.record(user, "Purchase", purchase.getId(), "PURCHASE_CONFIRMED",
                 PurchaseStatus.PENDING, PurchaseStatus.CONFIRMED);
+
+        Counter.builder("luxtrox.purchases.confirmed")
+                .description("Compras confirmadas, por tipo de plan")
+                .tag("planType", purchase.getPlanType().name())
+                .register(meterRegistry)
+                .increment();
 
         generateInvoiceAndNotify(purchase);
 

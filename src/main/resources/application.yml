@@ -71,6 +71,16 @@ springdoc:
     path: /api-docs
 
 management:
+  endpoint:
+    health:
+      # /actuator/health sigue siendo publico (ver SecurityConfig),
+      # pero solo muestra UP/DOWN generico a quien no esta autenticado.
+      # El detalle por integracion (cual credencial falta, ver
+      # health/*HealthIndicator) solo se ve si el que llama esta
+      # autenticado con rol ADMIN -- no se quiere filtrar publicamente
+      # cual credencial especifica esta mal configurada.
+      show-details: when-authorized
+      roles: ADMIN
   endpoints:
     web:
       exposure:

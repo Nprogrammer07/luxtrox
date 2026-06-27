@@ -7,6 +7,8 @@ import com.luxtrox.backend.entity.enums.PositionStatus;
 import com.luxtrox.backend.entity.enums.ReferralStatus;
 import com.luxtrox.backend.entity.enums.ZenithLicenseStatus;
 import com.luxtrox.backend.repository.*;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +53,7 @@ public class ReferralService {
     private final CashbackTransactionRepository cashbackTransactionRepository;
     private final AuditService auditService;
     private final NotificationEmailService notificationEmailService;
+    private final MeterRegistry meterRegistry;
 
     public ReferralService(ReferralRepository referralRepository,
                             UserRepository userRepository,
@@ -58,7 +61,8 @@ public class ReferralService {
                             ZenithLicenseRepository zenithLicenseRepository,
                             CashbackTransactionRepository cashbackTransactionRepository,
                             AuditService auditService,
-                            NotificationEmailService notificationEmailService) {
+                            NotificationEmailService notificationEmailService,
+                            MeterRegistry meterRegistry) {
         this.referralRepository = referralRepository;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
@@ -66,6 +70,7 @@ public class ReferralService {
         this.cashbackTransactionRepository = cashbackTransactionRepository;
         this.auditService = auditService;
         this.notificationEmailService = notificationEmailService;
+        this.meterRegistry = meterRegistry;
     }
 
     /** Driver = 9% del precio, Zenith = 40% del precio -- sin cambios respecto al diseno original. */
@@ -157,7 +162,7 @@ public class ReferralService {
                 new Object[]{position.getCashbackPaid(), position.getCashbackRemaining()});
 
         referral.setTargetPosition(position);
-        creditBalanceAndNotify(referrer, applied, referral);
+        creditBalanceAndNotify(referrer, applied, referral, "DRIVER");
 
         if (lost.compareTo(BigDecimal.ZERO) > 0) {
             forfeitCommission(referrer, lost, "DRIVER_EXCEEDS_REMAINING");
@@ -183,10 +188,10 @@ public class ReferralService {
         tx.setSourceReferral(referral);
         cashbackTransactionRepository.save(tx);
 
-        creditBalanceAndNotify(referrer, commission, referral);
+        creditBalanceAndNotify(referrer, commission, referral, "ZENITH");
     }
 
-    private void creditBalanceAndNotify(User referrer, BigDecimal amount, Referral referral) {
+    private void creditBalanceAndNotify(User referrer, BigDecimal amount, Referral referral, String planTypeTag) {
         BigDecimal oldBalance = referrer.getAvailableBalance();
         referrer.setAvailableBalance(referrer.getAvailableBalance().add(amount));
         userRepository.save(referrer);
@@ -194,14 +199,33 @@ public class ReferralService {
         auditService.record(referrer, "User", referrer.getId(), "REFERRAL_COMMISSION_PAID",
                 oldBalance, referrer.getAvailableBalance());
 
+        Counter.builder("luxtrox.referral.commission.paid")
+                .description("Total en dolares pagado por comisiones de referido")
+                .tag("planType", planTypeTag)
+                .register(meterRegistry)
+                .increment(amount.doubleValue());
+
         referral.setBonusPaidAt(OffsetDateTime.now());
         notifyReferrerQuietly(referrer, amount);
     }
 
-    /** Ninguna transaccion de dinero -- solo queda registro en audit_logs para soporte/trazabilidad. */
+    /**
+     * Ninguna transaccion de dinero -- solo queda registro en
+     * audit_logs para soporte/trazabilidad. La metrica permite ver,
+     * sin entrar a leer logs, cuanto dinero se esta perdiendo y por
+     * cual razon -- util para decidir si la regla de elegibilidad
+     * (ver docs/domain-model.md adenda de Fase 8) es demasiado
+     * estricta en la practica.
+     */
     private void forfeitCommission(User referrer, BigDecimal amountLost, String reason) {
         auditService.recordSystemAction("User", referrer.getId(), "REFERRAL_COMMISSION_FORFEITED_" + reason,
                 null, amountLost);
+
+        Counter.builder("luxtrox.referral.commission.forfeited")
+                .description("Total en dolares perdido en comisiones de referido, por razon")
+                .tag("reason", reason)
+                .register(meterRegistry)
+                .increment(amountLost.doubleValue());
     }
 
     /**

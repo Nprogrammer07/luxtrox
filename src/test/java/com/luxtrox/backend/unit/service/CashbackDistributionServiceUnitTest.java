@@ -10,6 +10,8 @@ import com.luxtrox.backend.repository.MonthlyPerformanceRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.service.AuditService;
 import com.luxtrox.backend.service.CashbackDistributionService;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,12 +50,14 @@ class CashbackDistributionServiceUnitTest {
     @Mock private AuditService auditService;
 
     private CashbackDistributionService service;
+    private MeterRegistry meterRegistry;
     private User user;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         service = new CashbackDistributionService(performanceRepository, positionRepository,
-                cashbackTransactionRepository, userRepository, auditService);
+                cashbackTransactionRepository, userRepository, auditService, meterRegistry);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
@@ -117,6 +121,9 @@ class CashbackDistributionServiceUnitTest {
 
         verifyNoInteractions(positionRepository, cashbackTransactionRepository, userRepository);
         verify(performanceRepository, never()).save(any());
+
+        // El early-return de idempotencia no debe contar como una distribucion real.
+        assertThat(meterRegistry.find("luxtrox.cashback.distribution").timer()).isNull();
     }
 
     @Test
@@ -154,6 +161,8 @@ class CashbackDistributionServiceUnitTest {
         ArgumentCaptor<MonthlyPerformance> perfCaptor = ArgumentCaptor.forClass(MonthlyPerformance.class);
         verify(performanceRepository).save(perfCaptor.capture());
         assertThat(perfCaptor.getValue().getAppliedAt()).isNotNull();
+
+        assertThat(meterRegistry.get("luxtrox.cashback.distribution").timer().count()).isEqualTo(1);
     }
 
     @Test
