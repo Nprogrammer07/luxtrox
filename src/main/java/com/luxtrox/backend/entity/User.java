@@ -15,6 +15,18 @@ public class User {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    /**
+     * Bloqueo optimista -- protege available_balance contra
+     * actualizaciones concurrentes perdidas (dos retiros simultaneos
+     * del mismo usuario, por ejemplo). JPA la incrementa solo; si dos
+     * transacciones leen la misma version y ambas intentan guardar,
+     * la segunda en llegar falla con OptimisticLockingFailureException
+     * en vez de pisar silenciosamente a la primera.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     @Column(name = "full_name", nullable = false, length = 150)
     private String fullName;
 

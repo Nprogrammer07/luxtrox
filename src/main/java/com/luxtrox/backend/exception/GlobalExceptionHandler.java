@@ -1,5 +1,6 @@
 package com.luxtrox.backend.exception;
 
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -15,6 +16,26 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * Se dispara cuando dos operaciones concurrentes intentan
+     * modificar el mismo registro (ej. dos retiros simultaneos del
+     * mismo usuario, ver @Version en User) -- 409 Conflict es el
+     * codigo correcto para "esto cambio mientras procesabas tu
+     * solicitud, intenta de nuevo", no un 500 generico. Puede surgir
+     * recien al hacer COMMIT, despues de que el metodo de servicio ya
+     * retorno -- por eso se atrapa aqui, a nivel global, y no dentro
+     * del propio servicio.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(OptimisticLockingFailureException ex,
+                                                                WebRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                ErrorResponse.of(409, "CONCURRENT_MODIFICATION",
+                        "Tu saldo o solicitud cambio mientras se procesaba esta accion -- intenta de nuevo",
+                        path(request))
+        );
+    }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex, WebRequest request) {

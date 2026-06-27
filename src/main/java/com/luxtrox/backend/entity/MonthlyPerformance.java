@@ -19,6 +19,19 @@ public class MonthlyPerformance {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    /**
+     * Bloqueo optimista -- distribute() depende de "appliedAt es
+     * null" para no reaplicar un reparto; sin esto, dos llamadas casi
+     * simultaneas (ej. el admin hace doble clic) podrian ambas leer
+     * appliedAt=null antes de que cualquiera lo marque, y repartir el
+     * rendimiento dos veces. Con @Version, la segunda transaccion en
+     * confirmar falla entera (rollback completo, incluyendo lo que ya
+     * le habia aplicado a las posiciones) en vez de duplicar el pago.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     @Column(name = "month", nullable = false)
     private Integer month;
 

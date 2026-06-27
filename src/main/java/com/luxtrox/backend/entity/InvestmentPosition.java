@@ -21,6 +21,16 @@ public class InvestmentPosition {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    /**
+     * Bloqueo optimista -- el reparto de rendimiento mensual y una
+     * comision de referido pueden caer casi al mismo tiempo sobre la
+     * misma posicion (ver User.version para el detalle completo del
+     * problema que esto evita).
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
