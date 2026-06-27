@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!--
+        Perfil "local": texto plano de siempre, mas facil de leer
+        mientras se desarrolla. Cualquier otro caso (sin perfil, o
+        cualquier perfil que no sea "local"): JSON estructurado,
+        pensado para produccion, donde un log shipper (CloudWatch,
+        Datadog, ELK) lo va a querer parsear como JSON, no como texto
+        libre (ver Fase 9, por ahora nada lo centraliza todavia,
+        pero el formato ya queda listo para cuando se conecte algo).
+    -->
+    <springProfile name="local">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <springProfile name="!local">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!--
+                    requestId viaja en el MDC (ver RequestCorrelationFilter),
+                    queda incluido automaticamente porque LogstashEncoder
+                    agrega TODO lo que haya en el MDC del hilo actual, sin
+                    necesidad de listarlo aqui explicitamente.
+                -->
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <customFields>{"app":"luxtrox-backend"}</customFields>
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <message>message</message>
+                    <logger>logger</logger>
+                    <thread>thread</thread>
+                    <level>level</level>
+                </fieldNames>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!--
+        Los niveles especificos (com.luxtrox.backend, org.hibernate.SQL,
+        etc.) ya estan en application.yml bajo logging.level.*, no se
+        repiten aqui para no tener la misma configuracion en dos
+        lugares que se puedan desincronizar.
+    -->
+
+</configuration>

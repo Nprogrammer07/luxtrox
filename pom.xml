@@ -71,6 +71,29 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!--
+            Fase 9: metricas. Sin version explicita: Spring Boot
+            gestiona la version compatible de Micrometer via su propio
+            BOM, igual que con el resto de starters. Expone
+            /actuator/prometheus, listo para que un Prometheus se
+            conecte despues aunque todavia no haya uno corriendo.
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!--
+            Fase 9: logs estructurados en JSON. 8.0 a proposito, NO
+            9.0: esa version migro a Jackson 3, que no es lo que trae
+            Spring Boot 3.3.5 (Jackson 2.x). 8.0 es la ultima que
+            sigue siendo Jackson 2 (recomienda 2.17.x, que es
+            practicamente lo que Spring Boot ya trae).
+        -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.0</version>
+        </dependency>
 
         <!-- OpenAPI / Swagger -->
         <dependency>

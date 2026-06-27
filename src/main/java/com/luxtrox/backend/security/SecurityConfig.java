@@ -71,6 +71,11 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/docs/**", "/api-docs/**", "/swagger-ui/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                // El resto de Actuator (metrics, prometheus) expone
+                // informacion operativa interna -- no es para
+                // cualquier usuario autenticado, solo para quien
+                // administra la infraestructura.
+                .requestMatchers("/actuator/**").hasRole("ADMIN")
                 // Spring Boot reenvia internamente a /error cuando se
                 // llama sendError() (lo que hacen authenticationEntryPoint
                 // y accessDeniedHandler de aqui abajo). JwtAuthenticationFilter

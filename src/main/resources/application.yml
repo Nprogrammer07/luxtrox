@@ -74,7 +74,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # health/info son publicos (ver SecurityConfig); metrics y
+        # prometheus quedan protegidos detras de hasRole("ADMIN") --
+        # exponen informacion operativa interna, no son para
+        # cualquier usuario autenticado. Prometheus no esta corriendo
+        # todavia (Fase 9, alcance acordado) -- esto solo deja el
+        # endpoint listo para cuando se conecte uno.
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: luxtrox-backend
 
 logging:
   level:
