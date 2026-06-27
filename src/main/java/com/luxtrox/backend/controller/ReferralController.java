@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,7 +34,19 @@ public class ReferralController {
         return ResponseEntity.ok(principal.getUser().getReferralCode());
     }
 
+    /**
+     * @Transactional aqui es necesario: referral.getReferred() es
+     * FetchType.LAZY, y toResponse() lo lee DESPUES de que
+     * referralRepository.findByReferrerAndStatus() ya devolvio (su
+     * propia transaccion, mas corta, ya cerro para ese punto). Sin
+     * esto, accederlo durante el mapeo tira LazyInitializationException
+     * -- el mismo patron que CustomUserPrincipal.getAuthorities()
+     * tenia con user.getRole() (ver ese comentario para el detalle
+     * completo), encontrado aqui al escribir el primer test que de
+     * verdad ejercitaba este endpoint.
+     */
     @GetMapping
+    @Transactional(readOnly = true)
     @Operation(summary = "Personas que he referido, y el estado de cada comision")
     public ResponseEntity<List<ReferralResponse>> myReferrals(
             @AuthenticationPrincipal CustomUserPrincipal principal) {
