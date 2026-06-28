@@ -712,3 +712,68 @@ automático, como el envío de instrucciones de pago), corregir en
 - **Campo nuevo:** se agregó `admin_notes` (migración V20) para registrar por
   qué se rechazó un comprobante — mismo patrón que `withdrawal_requests`.
 
+## 11. Adenda — dashboard agregado de admin (integracion con frontend)
+
+`AdminReportsService` + `AdminReportsController` (`GET /admin/stats`,
+`GET /admin/reports/{revenue,users,referrals}`) -- pedidos por el frontend
+(Next.js), que ya tenia el tipo `AdminStats` y los 3 endpoints de graficas
+definidos de forma especulativa antes de que este backend existiera. Mapeo de
+cada campo contra las tablas reales:
+
+| Campo del frontend | Origen real |
+|---|---|
+| `totalUsers` / `activeUsers` | `COUNT(*)` de `users` / con `status = ACTIVE` |
+| `totalSeminars` | `COUNT(*)` de `investment_positions` -- "seminario" en el frontend = un paquete Driver comprado. Zenith **no** cuenta: genera `ZenithLicense`, no participa del motor de cashback (ver `PurchaseService`) |
+| `totalCapital` | `SUM(capital)` de `investment_positions` -- por la misma razon, es capital de Driver unicamente |
+| `totalCashbackPaid` | `SUM(amount)` de `cashback_transactions` -- los 4 tipos representan dinero realmente repartido (no existe un tipo "FORFEITED": los montos no aplicados nunca generan fila ahi) |
+| `pendingWithdrawals(Amount)` | `withdrawal_requests` con `status = REQUESTED` (el "pending" del frontend) |
+| `totalReferrals` | `COUNT(*)` de `referrals`, sin filtrar por status |
+| `monthlyRevenue` | `SUM(total_amount)` de compras `CONFIRMED` del mes calendario actual |
+| `monthlyGrowth` | % de cambio de `monthlyRevenue` contra el mes calendario anterior. Si el mes anterior fue 0: 100% si este mes tiene ingreso, 0% si tambien fue 0 (evita dividir por cero) |
+
+Las 3 graficas cubren los **ultimos 6 meses calendario fijos** (sin parametro
+configurable -- el tipo `ChartDataPoint` del frontend no define ninguno). Los
+meses sin actividad se rellenan con 0 explicitamente en `AdminReportsService`:
+una consulta `GROUP BY` normal omite esos meses, lo que dejaria huecos en la
+grafica en vez de un punto en cero.
+
+Las 3 consultas agrupadas por mes usan SQL nativo (`date_trunc`), no JPQL --
+este proyecto siempre corre contra Postgres real (Testcontainers en tests,
+Supabase en produccion), asi que no hay perdida real de portabilidad, y evita
+la ambiguedad de mapear funciones nativas a traves de JPQL.
+
+## 12. Adenda — UserController (no existía, integración con frontend)
+
+El frontend (Next.js) ya tenía un `UserController` completo imaginado
+(`GET/PUT /users/me`, `GET /admin/users`, `GET /admin/users/{id}`,
+`PATCH /admin/users/{id}/status`) antes de que este backend existiera —
+nunca se había construido nada de esto. Implementado en `UserService` +
+`UserController`.
+
+Simplificaciones deliberadas:
+
+- **Campos sin columna real:** `avatar`, `country`, `walletAddress`,
+  `blockchainNetwork` del tipo `User` del frontend no tienen equivalente en
+  la tabla `users` — se omiten de la respuesta (son opcionales en ese tipo).
+- **`maxSeminars`:** no existe ningún tope real de paquetes Driver por
+  usuario en este negocio. El frontend lo exige como número no opcional —
+  se devuelve un valor fijo generoso (`UserProfileResponse.NO_REAL_CAP_PLACEHOLDER
+  = 9999`) en vez de inventar una regla de negocio que no existe.
+- **`seminarsCount` / `totalInvested`:** mismo criterio que `totalSeminars` /
+  `totalCapital` en las stats de admin (§11) — cuentan `InvestmentPosition`
+  únicamente (Driver). Zenith no es un "seminario" en este sentido.
+- **`referredBy`:** se mapea al `referralCode` del referente (no su id) —
+  es el valor más significativo para mostrar, y coincide con el vocabulario
+  que ya usa `RegisterRequest.referralCode`.
+- **`GET /admin/users/{id}`** devuelve el mismo `UserProfileResponse` que
+  `/users/me`, SIN el tipo `AdminUser` extendido que el frontend también
+  define (`seminars`/`cashbackSummary`/`withdrawals` anidados) — esa
+  agregación más pesada queda pendiente.
+- **Sin paginación real de servidor** en `listUsers()` (mismo criterio que
+  el resto de los listados de admin de este backend), y sin evitar el N+1
+  al calcular `seminarsCount`/`totalInvested` por cada usuario listado —
+  aceptable para una base de usuarios de etapa temprana.
+- **`role`/`status`** se devuelven en MAYÚSCULAS, tal como los maneja el
+  backend (`"ADMIN"`, `"ACTIVE"`) — la traducción a minúsculas que usa el
+  frontend internamente pasa por su propia capa de servicio (`services/*.ts`),
+  no por este endpoint.

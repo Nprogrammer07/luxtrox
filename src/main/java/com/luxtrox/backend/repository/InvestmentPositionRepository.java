@@ -4,6 +4,9 @@ import com.luxtrox.backend.entity.InvestmentPosition;
 import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.PositionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,4 +33,20 @@ public interface InvestmentPositionRepository extends JpaRepository<InvestmentPo
      */
     List<InvestmentPosition> findByUserAndStatusAndCashbackRemainingGreaterThanOrderByCreatedAtDesc(
             User user, PositionStatus status, java.math.BigDecimal minCashbackRemaining);
+
+    /**
+     * Para AdminReportsService.getStats() -- "totalCapital" en el
+     * dashboard de admin. Solo Driver genera InvestmentPosition
+     * (Zenith genera ZenithLicense, sin participar del motor de
+     * cashback -- ver PurchaseService), asi que esto es
+     * deliberadamente capital de Driver unicamente.
+     */
+    @Query("SELECT COALESCE(SUM(p.capital), 0) FROM InvestmentPosition p")
+    BigDecimal sumCapital();
+
+    /** Para UserService -- "seminarsCount"/"totalInvested" del perfil de un usuario especifico. */
+    long countByUser(User user);
+
+    @Query("SELECT COALESCE(SUM(p.capital), 0) FROM InvestmentPosition p WHERE p.user = :user")
+    BigDecimal sumCapitalByUser(@Param("user") User user);
 }
