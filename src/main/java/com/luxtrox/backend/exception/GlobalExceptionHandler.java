@@ -1,5 +1,7 @@
 package com.luxtrox.backend.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +18,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
      * Se dispara cuando dos operaciones concurrentes intentan
@@ -86,6 +90,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex, WebRequest request) {
+        // Sin este log, CUALQUIER error 500 inesperado queda invisible
+        // -- ni en consola ni en produccion habria rastro de que algo
+        // fallo, mas alla de que el cliente recibio un 500 generico.
+        log.error("Error inesperado en {}: {}", path(request), ex.getMessage(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                 ErrorResponse.of(500, "INTERNAL_ERROR", "Ocurrio un error inesperado", path(request))
         );

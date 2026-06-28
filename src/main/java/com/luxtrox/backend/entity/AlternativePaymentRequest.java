@@ -41,6 +41,9 @@ public class AlternativePaymentRequest {
     @Column(name = "reviewed_at")
     private OffsetDateTime reviewedAt;
 
+    @Column(name = "admin_notes", length = 500)
+    private String adminNotes;
+
     protected AlternativePaymentRequest() {
         // JPA
     }
@@ -92,5 +95,13 @@ public class AlternativePaymentRequest {
 
     public void setReviewedAt(OffsetDateTime reviewedAt) {
         this.reviewedAt = reviewedAt;
+    }
+
+    public String getAdminNotes() {
+        return adminNotes;
+    }
+
+    public void setAdminNotes(String adminNotes) {
+        this.adminNotes = adminNotes;
     }
 }

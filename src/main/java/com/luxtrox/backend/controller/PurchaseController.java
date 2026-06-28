@@ -7,6 +7,7 @@ import com.luxtrox.backend.entity.enums.PaymentMethod;
 import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
+import com.luxtrox.backend.service.AlternativePaymentService;
 import com.luxtrox.backend.service.PurchaseService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,15 +25,20 @@ public class PurchaseController {
 
     private final PurchaseService purchaseService;
     private final PurchaseRepository purchaseRepository;
+    private final AlternativePaymentService alternativePaymentService;
 
-    public PurchaseController(PurchaseService purchaseService, PurchaseRepository purchaseRepository) {
+    public PurchaseController(PurchaseService purchaseService, PurchaseRepository purchaseRepository,
+                               AlternativePaymentService alternativePaymentService) {
         this.purchaseService = purchaseService;
         this.purchaseRepository = purchaseRepository;
+        this.alternativePaymentService = alternativePaymentService;
     }
 
     @PostMapping
     @Operation(summary = "Crear una compra (Driver o Zenith) en estado PENDING. "
-            + "Si paymentMethod=CRYPTO, la respuesta incluye cryptoInvoiceUrl para redirigir al usuario a pagar.")
+            + "Si paymentMethod=CRYPTO, la respuesta incluye cryptoInvoiceUrl para redirigir al usuario a pagar. "
+            + "Si paymentMethod=ALTERNATIVE, se crea automaticamente la solicitud de pago manual "
+            + "(ver POST /alternative-payments/{id}/proof para subir el comprobante una vez aprobada).")
     public ResponseEntity<PurchaseResponse> create(@AuthenticationPrincipal CustomUserPrincipal principal,
                                                      @Valid @RequestBody CreatePurchaseRequest request) {
         Purchase purchase = request.planType() == PlanType.DRIVER
@@ -42,6 +48,8 @@ public class PurchaseController {
         String cryptoInvoiceUrl = null;
         if (purchase.getPaymentMethod() == PaymentMethod.CRYPTO) {
             cryptoInvoiceUrl = purchaseService.initiateCryptoPayment(purchase);
+        } else if (purchase.getPaymentMethod() == PaymentMethod.ALTERNATIVE) {
+            alternativePaymentService.createRequest(purchase);
         }
 
         return ResponseEntity.ok(toResponse(purchase, cryptoInvoiceUrl));

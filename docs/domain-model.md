@@ -672,5 +672,43 @@ adenda queda sin efecto.
 `referrals.status` para permitir `'RESOLVED'`, sin tocar ni eliminar los
 valores históricos (`QUALIFIED_AWAITING_REFERRER`, `BONUS_PAID`).
 
+## 10. Adenda — flujo de pago alternativo completo (gap de la Fase 7, cerrado)
 
+`AlternativePaymentRequest` (entidad, repositorio, migración) existía desde la
+Fase 4, pero nunca tuvo service ni controllers — la Fase 7 documentó esto
+explícitamente como un hueco (§8.4 de esa adenda). Implementado en
+`AlternativePaymentService` + `AlternativePaymentController` (lado del
+usuario) + `AdminAlternativePaymentController` (lado del admin).
+
+### 10.1 Ambigüedad resuelta en la máquina de estados
+
+El diagrama de §3.5 no especifica qué acción distinta mueve
+`APPROVED → PAYMENT_PROOF_PENDING` — a diferencia de las demás flechas, que sí
+tienen un disparador claro (aprobar, subir comprobante, confirmar, rechazar,
+o que pasen 72h sin avanzar).
+
+**Interpretación usada:** `approve()` deja la solicitud en `APPROVED`, y
+`uploadProof()` acepta como precondición válida tanto `APPROVED` como
+`PAYMENT_PROOF_PENDING` (los trata como equivalentes para ese propósito). Esto
+evita inventar un tercer endpoint sin una acción clara que lo justifique, sin
+dejar de honrar los dos valores tal como quedaron documentados. Si la
+intención original era otra (ej. que `PAYMENT_PROOF_PENDING` lo dispare algo
+automático, como el envío de instrucciones de pago), corregir en
+`AlternativePaymentService.uploadProof()`.
+
+### 10.2 Decisiones adicionales no cubiertas explícitamente por el diagrama
+
+- **Rechazo:** solo permitido desde `UNDER_REVIEW` (coincide con la única
+  flecha de rechazo dibujada). Rechazar también marca la `Purchase`
+  subyacente como `REJECTED` (su propia máquina de estados, §3.1, ya permite
+  esa transición).
+- **Expiración:** solo aplica a solicitudes que SIGUEN en `REQUESTED` — una
+  vez aprobada, el reloj de 72h deja de aplicar según el diagrama (la única
+  flecha de expiración sale de `REQUESTED`). Expirar también marca la
+  `Purchase` como `EXPIRED`.
+- **Quién dispara la expiración:** no hay scheduler/cron en este proyecto
+  todavía — `POST /admin/alternative-payments/expire-overdue` sigue el mismo
+  patrón manual que `ZenithService.expireOverdueLicenses()`.
+- **Campo nuevo:** se agregó `admin_notes` (migración V20) para registrar por
+  qué se rechazó un comprobante — mismo patrón que `withdrawal_requests`.
 
