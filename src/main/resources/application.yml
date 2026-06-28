@@ -29,7 +29,10 @@ spring:
     baseline-version: 0
 
 server:
-  port: ${SERVER_PORT:8080}
+  # PORT primero: es la convencion que Railway (y Render, Heroku)
+  # inyectan automaticamente en runtime -- SERVER_PORT queda como
+  # respaldo para cualquier otro entorno que prefiera ese nombre.
+  port: ${PORT:${SERVER_PORT:8080}}
 
 # Fase 5 - Spring Security / JWT.
 # app.jwt.secret SIEMPRE por variable de entorno, nunca hardcodeado.

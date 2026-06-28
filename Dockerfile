@@ -43,7 +43,11 @@ EXPOSE 8080
 
 # --spider just revisa que la URL responda (2xx/3xx), sin descargar el
 # cuerpo -- mas simple y robusto que parsear el JSON de salud con grep.
+# ${PORT:-8080} en vez de un puerto fijo: Railway (y Render, Heroku)
+# inyectan PORT en runtime, y esto corre en forma "shell" (sin []),
+# lo que Docker expande automaticamente via /bin/sh -c al momento de
+# ejecutar el chequeo, no al construir la imagen.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-    CMD wget --spider -q http://localhost:8080/actuator/health || exit 1
+    CMD wget --spider -q http://localhost:${PORT:-8080}/actuator/health || exit 1
 
 ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -1,0 +1,14 @@
+# Railway SIEMPRE construye con un Dockerfile si lo encuentra -- esto
+# es solo para ser explicitos y para configurar el healthcheck
+# (ver docs/deployment.md para la guia completa de despliegue).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# /actuator/health es publico (ver SecurityConfig) -- Railway hace
+# estas peticiones desde healthcheck.railway.app, sin autenticar.
+healthcheckPath = "/actuator/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
