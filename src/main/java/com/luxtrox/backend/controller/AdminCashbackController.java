@@ -1,10 +1,12 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.cashback.CashbackRecordResponse;
 import com.luxtrox.backend.dto.cashback.MonthlyPerformanceResponse;
 import com.luxtrox.backend.dto.cashback.RegisterPerformanceRequest;
 import com.luxtrox.backend.entity.MonthlyPerformance;
 import com.luxtrox.backend.security.CustomUserPrincipal;
 import com.luxtrox.backend.service.CashbackDistributionService;
+import com.luxtrox.backend.service.CashbackQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -12,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -22,13 +25,22 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/admin/cashback")
-@Tag(name = "Admin - Cashback", description = "Registro y distribucion del rendimiento mensual")
+@Tag(name = "Admin - Cashback", description = "Registro, distribucion, y consulta del rendimiento mensual")
 public class AdminCashbackController {
 
     private final CashbackDistributionService distributionService;
+    private final CashbackQueryService cashbackQueryService;
 
-    public AdminCashbackController(CashbackDistributionService distributionService) {
+    public AdminCashbackController(CashbackDistributionService distributionService,
+                                    CashbackQueryService cashbackQueryService) {
         this.distributionService = distributionService;
+        this.cashbackQueryService = cashbackQueryService;
+    }
+
+    @GetMapping
+    @Operation(summary = "Listar todas las transacciones de cashback (todos los usuarios)")
+    public List<CashbackRecordResponse> list() {
+        return cashbackQueryService.getAllCashback();
     }
 
     @PostMapping("/monthly-performance")

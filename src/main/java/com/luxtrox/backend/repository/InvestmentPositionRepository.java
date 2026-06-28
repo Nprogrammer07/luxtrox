@@ -49,4 +49,8 @@ public interface InvestmentPositionRepository extends JpaRepository<InvestmentPo
 
     @Query("SELECT COALESCE(SUM(p.capital), 0) FROM InvestmentPosition p WHERE p.user = :user")
     BigDecimal sumCapitalByUser(@Param("user") User user);
+
+    /** Para CashbackQueryService.getSummary() -- "targetFinal" (el cashback total al que un usuario tiene derecho, en sus posiciones Driver). */
+    @Query("SELECT COALESCE(SUM(p.targetCashback), 0) FROM InvestmentPosition p WHERE p.user = :user")
+    BigDecimal sumTargetCashbackByUser(@Param("user") User user);
 }

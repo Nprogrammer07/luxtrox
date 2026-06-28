@@ -1,5 +1,8 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.cashback.CashbackMonthlyResponse;
+import com.luxtrox.backend.dto.cashback.CashbackRecordResponse;
+import com.luxtrox.backend.dto.cashback.CashbackSummaryResponse;
 import com.luxtrox.backend.dto.cashback.CashbackTransactionResponse;
 import com.luxtrox.backend.entity.CashbackTransaction;
 import com.luxtrox.backend.entity.InvestmentPosition;
@@ -7,6 +10,7 @@ import com.luxtrox.backend.exception.ResourceNotFoundException;
 import com.luxtrox.backend.repository.CashbackTransactionRepository;
 import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
+import com.luxtrox.backend.service.CashbackQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -20,9 +24,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Historial de cashback del usuario autenticado, posicion por
- * posicion -- no se expone "todas las transacciones de todos" aqui,
- * eso seria un endpoint de admin si llega a necesitarse mas adelante.
+ * Historial de cashback del usuario autenticado -- no se expone
+ * "todas las transacciones de todos" aqui, eso es AdminCashbackController.
  */
 @RestController
 @RequestMapping("/cashback")
@@ -31,11 +34,32 @@ public class CashbackController {
 
     private final InvestmentPositionRepository positionRepository;
     private final CashbackTransactionRepository transactionRepository;
+    private final CashbackQueryService cashbackQueryService;
 
     public CashbackController(InvestmentPositionRepository positionRepository,
-                               CashbackTransactionRepository transactionRepository) {
+                               CashbackTransactionRepository transactionRepository,
+                               CashbackQueryService cashbackQueryService) {
         this.positionRepository = positionRepository;
         this.transactionRepository = transactionRepository;
+        this.cashbackQueryService = cashbackQueryService;
+    }
+
+    @GetMapping("/summary")
+    @Operation(summary = "Resumen de cashback (totales, saldo disponible, progreso hacia la meta)")
+    public CashbackSummaryResponse summary(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return cashbackQueryService.getSummary(principal.getUser());
+    }
+
+    @GetMapping("/history")
+    @Operation(summary = "Historial de cashback recibido (todas mis posiciones Driver)")
+    public List<CashbackRecordResponse> history(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return cashbackQueryService.getHistory(principal.getUser());
+    }
+
+    @GetMapping("/monthly")
+    @Operation(summary = "Cashback recibido por mes, ultimos 6 meses (para la grafica)")
+    public List<CashbackMonthlyResponse> monthly(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return cashbackQueryService.getMonthlyChart(principal.getUser());
     }
 
     @GetMapping("/positions/{positionId}/transactions")
