@@ -33,6 +33,16 @@ server:
   # inyectan automaticamente en runtime -- SERVER_PORT queda como
   # respaldo para cualquier otro entorno que prefiera ese nombre.
   port: ${PORT:${SERVER_PORT:8080}}
+  # Railway (como cualquier plataforma detras de un proxy/balanceador)
+  # termina HTTPS en su borde y le reenvia la peticion a este
+  # contenedor por HTTP simple, agregando headers X-Forwarded-Proto/
+  # Host/Port para que la app sepa cual era el protocolo ORIGINAL.
+  # Sin esto, Spring Boot (y por lo tanto Swagger/OpenAPI, y cualquier
+  # redirect con Location) cree que TODO llego por http://, generando
+  # URLs http:// que el navegador bloquea por "mixed content" cuando
+  # la pagina misma se cargo por https:// (esto es lo que causaba el
+  # "Failed to fetch" en Swagger UI).
+  forward-headers-strategy: framework
 
 # Fase 5 - Spring Security / JWT.
 # app.jwt.secret SIEMPRE por variable de entorno, nunca hardcodeado.
