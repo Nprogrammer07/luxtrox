@@ -82,7 +82,32 @@ Railway espera a que el job `test` de GitHub Actions pase (incluyendo el gate de
 cobertura del 90%) antes de intentar desplegar -- nunca vas a desplegar una versión
 que ni siquiera pasó sus propios tests.
 
-## Sobre la imagen en GitHub Container Registry (Fase 11)
+## 6. Crear tu primer usuario ADMIN
+
+El registro público (`POST /auth/register`) siempre asigna rol `USER` -- es lo
+correcto, nadie debería poder auto-asignarse `ADMIN` por la API. Pero entonces,
+¿cómo creas el primer admin en producción, donde no tienes acceso directo y cómodo a
+la base de datos?
+
+1. Regístrate normal, por la API pública, con el correo que va a ser tu cuenta admin:
+   ```
+   POST https://tu-proyecto.up.railway.app/auth/register
+   {"fullName": "Tu Nombre", "email": "tu-correo@ejemplo.com", "phone": "+1", "password": "..."}
+   ```
+2. En Railway → Variables, agrega:
+   ```
+   BOOTSTRAP_ADMIN_EMAIL=tu-correo@ejemplo.com
+   ```
+3. Eso dispara un redeploy automático. Al arrancar, la app encuentra ese usuario y lo
+   promueve a `ADMIN` -- vas a ver una línea de log como
+   `Usuario 'tu-correo@ejemplo.com' promovido a ADMIN...` en los Deploy Logs.
+4. **Quita esa variable de entorno** ahora que la promoción se confirmó. Si la dejas
+   puesta y más adelante le quitas el rol admin a esa cuenta a propósito, el
+   siguiente reinicio la volvería a promover sin que lo pidieras.
+5. Haz login normal (`POST /auth/login`) con ese mismo correo -- el token que recibas
+   ya trae el rol `ADMIN`, listo para usar en `/admin/**`.
+
+
 
 Railway construye su propia imagen directo del `Dockerfile` -- no necesita la imagen
 que el pipeline de CI publica en GHCR para funcionar. Esa imagen sigue siendo útil por
