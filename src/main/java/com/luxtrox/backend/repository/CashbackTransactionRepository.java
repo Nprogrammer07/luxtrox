@@ -2,6 +2,7 @@ package com.luxtrox.backend.repository;
 
 import com.luxtrox.backend.entity.CashbackTransaction;
 import com.luxtrox.backend.entity.InvestmentPosition;
+import com.luxtrox.backend.entity.Referral;
 import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.CashbackTransactionType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -67,4 +68,27 @@ public interface CashbackTransactionRepository extends JpaRepository<CashbackTra
     /** Para AdminCashbackController -- listado de TODAS las transacciones de cashback, sin filtrar por usuario. */
     @Query("SELECT c FROM CashbackTransaction c WHERE c.type IN :types ORDER BY c.createdAt DESC")
     List<CashbackTransaction> findByTypeIn(@Param("types") List<CashbackTransactionType> types);
+
+    /** Para AdminReferralController -- "bonusAmount" del listado de admin: cuanto se le pago efectivamente por esta referencia. */
+    @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c WHERE c.sourceReferral = :referral")
+    BigDecimal sumAmountBySourceReferral(@Param("referral") Referral referral);
+
+    /**
+     * Para ReferralController.summary()/.bonuses() -- "cuanto he
+     * ganado en total por referidos". Cubre AMBOS casos de como un
+     * bono de referido puede quedar registrado: REFERRAL_BONUS_DIRECT
+     * tiene c.user propio (Zenith, pago directo a balance);
+     * REFERRAL_BONUS NO tiene c.user (Driver, se aplica como avance a
+     * una posicion -- su usuario solo se conoce via c.position.user).
+     * El OR cubre los dos sin necesitar dos consultas separadas.
+     */
+    @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c " +
+            "WHERE c.type IN ('REFERRAL_BONUS', 'REFERRAL_BONUS_DIRECT') " +
+            "AND (c.user = :user OR c.position.user = :user)")
+    BigDecimal sumReferralBonusForUser(@Param("user") User user);
+
+    @Query("SELECT c FROM CashbackTransaction c " +
+            "WHERE c.type IN ('REFERRAL_BONUS', 'REFERRAL_BONUS_DIRECT') " +
+            "AND (c.user = :user OR c.position.user = :user) ORDER BY c.createdAt DESC")
+    List<CashbackTransaction> findReferralBonusesForUser(@Param("user") User user);
 }

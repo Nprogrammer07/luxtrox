@@ -1,5 +1,6 @@
 package com.luxtrox.backend.service;
 
+import com.luxtrox.backend.dto.withdrawal.AdminWithdrawalResponse;
 import com.luxtrox.backend.entity.*;
 import com.luxtrox.backend.entity.enums.BankAccountType;
 import com.luxtrox.backend.entity.enums.WithdrawalStatus;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -192,5 +194,59 @@ public class WithdrawalService {
                             + request.getStatus() + ")");
         }
         return request;
+    }
+
+    /**
+     * Para AdminWithdrawalController -- listado de todas las
+     * solicitudes (admin), opcionalmente filtrado por status.
+     */
+    @Transactional(readOnly = true)
+    public List<AdminWithdrawalResponse> listAll(WithdrawalStatus status) {
+        List<WithdrawalRequest> requests = status != null
+                ? withdrawalRequestRepository.findByStatus(status)
+                : withdrawalRequestRepository.findAll();
+        return requests.stream().map(this::toAdminResponse).toList();
+    }
+
+    /**
+     * userName/userEmail/phone vienen de la "foto" guardada en
+     * Crypto/BankWithdrawalDetail al momento de la solicitud, NO del
+     * perfil actual del usuario -- representa con que datos se debe
+     * procesar EL PAGO, que pueden diferir si el usuario actualizo su
+     * perfil despues de pedir el retiro.
+     */
+    private AdminWithdrawalResponse toAdminResponse(WithdrawalRequest request) {
+        String userName;
+        String userEmail;
+        String phone;
+        String walletAddress = null;
+        String network = null;
+        String transactionHash = null;
+
+        if (request.getType() == WithdrawalType.CRYPTO) {
+            CryptoWithdrawalDetail detail = cryptoDetailRepository.findByWithdrawalRequest(request)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Retiro CRYPTO sin CryptoWithdrawalDetail -- inconsistencia de datos: " + request.getId()));
+            userName = detail.getFullName();
+            userEmail = detail.getEmail();
+            phone = detail.getPhone();
+            walletAddress = detail.getWalletAddress();
+            network = detail.getBlockchainNetwork();
+            transactionHash = detail.getTransactionHash();
+        } else {
+            BankWithdrawalDetail detail = bankDetailRepository.findByWithdrawalRequest(request)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Retiro BANK sin BankWithdrawalDetail -- inconsistencia de datos: " + request.getId()));
+            userName = detail.getFullName();
+            userEmail = detail.getEmail();
+            phone = detail.getPhone();
+        }
+
+        return new AdminWithdrawalResponse(
+                request.getId(), request.getUser().getId(), userName, userEmail, phone,
+                walletAddress, network, request.getAmount(), request.getStatus(),
+                request.getAdminNotes(), request.getRequestedAt(), request.getProcessedAt(),
+                request.getPaidAt(), transactionHash
+        );
     }
 }

@@ -248,4 +248,63 @@ class WithdrawalServiceUnitTest {
 
         assertThrows(ResourceNotFoundException.class, () -> service.markPaid(id, admin));
     }
+
+    // ---------- listAll() (admin) ----------
+
+    @Test
+    void listAll_cryptoWithdrawal_usesSnapshotFromCryptoDetail_notUserProfile() {
+        WithdrawalRequest request = requestedWithdrawal(user, new BigDecimal("100.00"));
+        var detail = new com.luxtrox.backend.entity.CryptoWithdrawalDetail(
+                request, "Nombre Al Momento Del Retiro", "snapshot@example.com", "+999", "TRC20", "wallet-xyz");
+        when(withdrawalRequestRepository.findAll()).thenReturn(java.util.List.of(request));
+        when(cryptoDetailRepository.findByWithdrawalRequest(request)).thenReturn(Optional.of(detail));
+
+        var result = service.listAll(null);
+
+        assertThat(result).hasSize(1);
+        var dto = result.get(0);
+        assertThat(dto.userName()).isEqualTo("Nombre Al Momento Del Retiro");
+        assertThat(dto.userEmail()).isEqualTo("snapshot@example.com");
+        assertThat(dto.walletAddress()).isEqualTo("wallet-xyz");
+        assertThat(dto.network()).isEqualTo("TRC20");
+    }
+
+    @Test
+    void listAll_bankWithdrawal_usesSnapshotFromBankDetail_walletFieldsAreNull() {
+        WithdrawalRequest request = new WithdrawalRequest(user, WithdrawalType.BANK, new BigDecimal("100.00"));
+        setId(request, UUID.randomUUID());
+        var detail = new com.luxtrox.backend.entity.BankWithdrawalDetail(
+                request, "Nombre Bancario", "bank@example.com", "+888", "Colombia", "Bancolombia",
+                BankAccountType.SAVINGS, "111222333", "Nombre Bancario", "1000999888");
+        when(withdrawalRequestRepository.findAll()).thenReturn(java.util.List.of(request));
+        when(bankDetailRepository.findByWithdrawalRequest(request)).thenReturn(Optional.of(detail));
+
+        var result = service.listAll(null);
+
+        assertThat(result).hasSize(1);
+        var dto = result.get(0);
+        assertThat(dto.userName()).isEqualTo("Nombre Bancario");
+        assertThat(dto.walletAddress()).isNull();
+        assertThat(dto.network()).isNull();
+        verifyNoInteractions(cryptoDetailRepository);
+    }
+
+    @Test
+    void listAll_withStatusFilter_delegatesToFindByStatus_notFindAll() {
+        when(withdrawalRequestRepository.findByStatus(WithdrawalStatus.PAID)).thenReturn(java.util.List.of());
+
+        service.listAll(WithdrawalStatus.PAID);
+
+        verify(withdrawalRequestRepository).findByStatus(WithdrawalStatus.PAID);
+        verify(withdrawalRequestRepository, never()).findAll();
+    }
+
+    @Test
+    void listAll_cryptoWithdrawalMissingDetail_throwsIllegalState_dataInconsistency() {
+        WithdrawalRequest request = requestedWithdrawal(user, new BigDecimal("100.00"));
+        when(withdrawalRequestRepository.findAll()).thenReturn(java.util.List.of(request));
+        when(cryptoDetailRepository.findByWithdrawalRequest(request)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalStateException.class, () -> service.listAll(null));
+    }
 }

@@ -1,5 +1,6 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.CreatePurchaseRequest;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.entity.Purchase;
@@ -61,6 +62,13 @@ public class PurchaseController {
         List<PurchaseResponse> response = purchaseRepository.findByUser(principal.getUser())
                 .stream().map(p -> toResponse(p, null)).toList();
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/positions")
+    @Operation(summary = "Listar mis 'seminarios' (InvestmentPosition ya confirmadas) -- "
+            + "distinto de GET /purchases, que devuelve compras (incluye PENDING, sin capital/cashback)")
+    public List<AdminSeminarResponse> myPositions(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return purchaseService.listMySeminars(principal.getUser());
     }
 
     private PurchaseResponse toResponse(Purchase purchase, String cryptoInvoiceUrl) {

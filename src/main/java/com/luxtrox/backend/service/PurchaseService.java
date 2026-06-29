@@ -4,6 +4,7 @@ import com.luxtrox.backend.entity.*;
 import com.luxtrox.backend.entity.enums.PaymentMethod;
 import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PurchaseStatus;
+import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.exception.BusinessRuleException;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
 import com.luxtrox.backend.integration.nowpayments.NowPaymentsClient;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -192,5 +194,33 @@ public class PurchaseService {
             auditService.recordSystemAction("Purchase", purchase.getId(), "INVOICE_OR_EMAIL_FAILED",
                     null, e.getMessage());
         }
+    }
+
+    /**
+     * Para AdminPurchaseController -- listado de "seminarios"
+     * (InvestmentPosition) para el admin, sin filtrar por usuario.
+     * Solo Driver genera posiciones; Zenith no aparece aqui (ver
+     * docs/domain-model.md adenda correspondiente).
+     */
+    @Transactional(readOnly = true)
+    public List<AdminSeminarResponse> listAllSeminars() {
+        return positionRepository.findAll().stream()
+                .map(this::toSeminarResponse)
+                .toList();
+    }
+
+    /** Para PurchaseController -- "mis seminarios" (mismo mapeo, filtrado a un usuario). */
+    @Transactional(readOnly = true)
+    public List<AdminSeminarResponse> listMySeminars(User user) {
+        return positionRepository.findByUser(user).stream()
+                .map(this::toSeminarResponse)
+                .toList();
+    }
+
+    private AdminSeminarResponse toSeminarResponse(InvestmentPosition p) {
+        return new AdminSeminarResponse(
+                p.getId(), p.getUser().getId(), p.getCapital(), p.getTargetCashback(),
+                p.getCashbackPaid(), p.getStatus().name().toLowerCase(),
+                p.getCreatedAt(), p.getCreatedAt(), p.getCompletedAt());
     }
 }

@@ -15,6 +15,10 @@ public interface ReferralRepository extends JpaRepository<Referral, UUID> {
     Optional<Referral> findByReferred(User referred);
     List<Referral> findByReferrerAndStatus(User referrer, ReferralStatus status);
 
+    /** Para ReferralController.summary() -- "totalReferrals" / "activeReferrals". */
+    long countByReferrer(User referrer);
+    long countByReferrerAndStatus(User referrer, ReferralStatus status);
+
     /**
      * Referidos nuevos por mes (sin importar status) -- para
      * AdminReportsService.getReferralsChart(). SQL nativo, mismo

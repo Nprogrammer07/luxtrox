@@ -14,6 +14,9 @@ public interface InvestmentPositionRepository extends JpaRepository<InvestmentPo
 
     List<InvestmentPosition> findByStatus(PositionStatus status);
 
+    /** Para PurchaseService.listMySeminars() -- "mis seminarios", todos los status, no solo activos. */
+    List<InvestmentPosition> findByUser(User user);
+
     /**
      * Orden deterministico para el bucle PRINCIPAL del algoritmo de
      * distribucion mensual (docs/domain-model.md 4.1) -- no es

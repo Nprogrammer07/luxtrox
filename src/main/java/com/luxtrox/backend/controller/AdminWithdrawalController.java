@@ -1,8 +1,10 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.withdrawal.AdminWithdrawalResponse;
 import com.luxtrox.backend.dto.withdrawal.RejectWithdrawalRequest;
 import com.luxtrox.backend.dto.withdrawal.WithdrawalResponse;
 import com.luxtrox.backend.entity.WithdrawalRequest;
+import com.luxtrox.backend.entity.enums.WithdrawalStatus;
 import com.luxtrox.backend.security.CustomUserPrincipal;
 import com.luxtrox.backend.service.WithdrawalService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -20,13 +23,19 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/admin/withdrawals")
-@Tag(name = "Admin - Withdrawals", description = "Aprobar, rechazar y marcar pagados los retiros")
+@Tag(name = "Admin - Withdrawals", description = "Listar, aprobar, rechazar y marcar pagados los retiros")
 public class AdminWithdrawalController {
 
     private final WithdrawalService withdrawalService;
 
     public AdminWithdrawalController(WithdrawalService withdrawalService) {
         this.withdrawalService = withdrawalService;
+    }
+
+    @GetMapping
+    @Operation(summary = "Listar todas las solicitudes de retiro -- status es un filtro opcional")
+    public List<AdminWithdrawalResponse> list(@RequestParam(required = false) WithdrawalStatus status) {
+        return withdrawalService.listAll(status);
     }
 
     @PostMapping("/{withdrawalId}/approve")

@@ -1,5 +1,6 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.entity.Purchase;
 import com.luxtrox.backend.service.PurchaseService;
@@ -9,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -19,7 +21,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/admin/purchases")
-@Tag(name = "Admin - Purchases", description = "Confirmacion de compras y renovacion de Zenith")
+@Tag(name = "Admin - Purchases", description = "Listado, confirmacion de compras, y renovacion de Zenith")
 public class AdminPurchaseController {
 
     private final PurchaseService purchaseService;
@@ -28,6 +30,12 @@ public class AdminPurchaseController {
     public AdminPurchaseController(PurchaseService purchaseService, ZenithService zenithService) {
         this.purchaseService = purchaseService;
         this.zenithService = zenithService;
+    }
+
+    @GetMapping
+    @Operation(summary = "Listar todos los 'seminarios' (posiciones Driver confirmadas), de todos los usuarios")
+    public List<AdminSeminarResponse> listSeminars() {
+        return purchaseService.listAllSeminars();
     }
 
     @PostMapping("/{purchaseId}/confirm")

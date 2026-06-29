@@ -777,3 +777,117 @@ Simplificaciones deliberadas:
   backend (`"ADMIN"`, `"ACTIVE"`) — la traducción a minúsculas que usa el
   frontend internamente pasa por su propia capa de servicio (`services/*.ts`),
   no por este endpoint.
+
+## 13. Adenda — endpoints de consulta de cashback (integración con frontend)
+
+El frontend ya tenía `/cashback/summary`, `/cashback/history`, `/cashback/monthly`
+y `/admin/cashback` definidos antes de que este backend existiera.
+`CashbackController` solo tenía `/cashback/positions/{id}/transactions`;
+`AdminCashbackController` solo tenía los 2 endpoints para *disparar* la
+distribución mensual, nada para *consultarla*. Implementado en
+`CashbackQueryService` + ambos controllers.
+
+Decisiones de mapeo:
+
+- **`totalGenerated` == `totalReceived`:** son el mismo valor calculado en
+  este backend — el motor de cashback acredita el saldo de forma inmediata
+  al distribuir (`CashbackDistributionService`), no existe un estado
+  intermedio "generado pero no recibido todavía". El frontend los define
+  como dos campos separados de forma especulativa.
+- **Solo cuenta cashback de POSICIÓN:** se excluyen a propósito
+  `REFERRAL_BONUS`/`REFERRAL_BONUS_DIRECT` — son un dominio separado en el
+  frontend (su propio servicio/tipo `Referral`/`ReferralBonus`).
+- **`available`** = `user.availableBalance` directo — no existe una
+  separación real entre "saldo de cashback" y "saldo de bonos de referido"
+  en este backend, ambos se acreditan al mismo campo.
+- **`status` de `CashbackRecord`** siempre vale `"PAID"` — una
+  `CashbackTransaction` en este backend solo se crea una vez que el monto YA
+  se acreditó, no existe un estado "pendiente"/"procesando" separado.
+- **Agrupación mensual** usa `sourcePerformance.year`/`.month` (a qué mes de
+  rendimiento corresponde), no `created_at` (cuándo se procesó la
+  distribución) — son conceptualmente distintos, y la gráfica quiere mostrar
+  el primero.
+- **`GET /admin/cashback`** reutiliza el mismo DTO `CashbackRecordResponse`
+  que el usuario (ya incluye `userId`) — no se construyó un DTO separado más
+  rico para el admin.
+
+## 14. Adenda — endpoints de listado de admin faltantes (withdrawals, seminars, referrals)
+
+Mismo patrón que las adendas §11/§12/§13: el frontend ya tenía
+`GET /admin/withdrawals`, `GET /admin/seminars` (purchases) y
+`GET /admin/referrals` definidos de forma especulativa — ninguno de los tres
+existía. `AdminWithdrawalController`/`AdminPurchaseController` ganaron un
+`GET` nuevo cada uno; `AdminReferralController` es enteramente nuevo.
+
+- **Retiros:** `AdminWithdrawalResponse` es un DTO *separado* de
+  `WithdrawalResponse` (que usan `requestCrypto`/`requestBank`/`myWithdrawals`)
+  — esos tres son del propio usuario, que ya conoce sus datos. El admin sí
+  necesita ver quién pide el retiro y a dónde pagar. Los campos
+  `userName`/`userEmail`/`phone` vienen de la *foto* guardada en
+  `Crypto`/`BankWithdrawalDetail` al momento de la solicitud, no del perfil
+  actual del usuario — representan con qué datos se debe procesar el pago,
+  que pueden diferir si el usuario actualizó su perfil después. Para retiros
+  `BANK`, `walletAddress`/`network` quedan `null` — el tipo `Withdrawal` del
+  frontend es deliberadamente solo-cripto, sin concepto de retiro bancario
+  todavía (gap ya señalado en la conversación original de integración).
+- **Seminarios:** mismo criterio que §11/§12 — solo `InvestmentPosition`
+  (Driver). `InvestmentPosition` no tiene un campo `updatedAt` real; se
+  devuelve `createdAt` en su lugar para satisfacer el campo no-opcional del
+  frontend. `completedAt` sí es real y mapea a `completionDate` (opcional).
+- **Referidos:** `AdminReferralResponse` también es separado de
+  `ReferralResponse` (la lista del propio usuario) — el admin necesita
+  `referrerId` explícito, abarca todos los referentes a la vez.
+  `status`: `PENDING_PURCHASE` → `"active"` (la relación sigue viva),
+  `RESOLVED` → `"inactive"` (ya se evaluó, pagada o perdida) — el tipo
+  `Referral` del frontend solo admite ese binario; el backend tiene un enum
+  de 4 valores con más matiz (dos de ellos `@Deprecated`). `bonusAmount` =
+  suma de `CashbackTransaction.amount` con `sourceReferral` apuntando a esa
+  fila.
+
+## 15. Adenda — endpoints de referidos del propio usuario que faltaban
+
+Al construir §14 (`/admin/referrals`) se reviso solo el lado de admin —
+quedaron sin notar 3 endpoints del lado del PROPIO usuario que el frontend
+también esperaba: `GET /referrals/summary`, `GET /referrals/bonuses`,
+`GET /referrals/validate/{code}`. Implementados directo en
+`ReferralController` (ya existente).
+
+- **`pendingBonus` siempre vale 0:** la evaluación de una comisión de
+  referido es única e inmediata, en el momento exacto en que se confirma la
+  compra del referido (ver adenda de Fase 8) — no existe un estado
+  "pendiente" intermedio en este backend. El campo se conserva solo porque
+  el tipo `ReferralSummary` del frontend lo definió de forma especulativa.
+- **`totalBonusEarned`/historial de bonos:** cubre los DOS casos de cómo
+  queda registrado un bono — `REFERRAL_BONUS_DIRECT` tiene `c.user` propio
+  (Zenith, pago directo a balance); `REFERRAL_BONUS` NO lo tiene (Driver, se
+  aplica como avance a una posición — su usuario solo se conoce vía
+  `c.position.user`). La consulta usa `c.user = :user OR c.position.user = :user`
+  para cubrir ambos sin necesitar dos consultas separadas (verificado contra
+  Postgres real que el `OR` con un lado `NULL` se comporta como se espera).
+- **`description` del bono se deja genérico** ("Comisión por referido") —
+  llegar al plan (Driver/Zenith) que originó la comisión exigiría atravesar
+  `sourceReferral.triggeringPurchase.planType`, un tercer salto `LAZY`
+  encima de los dos que ya tiene este DTO; no se consideró que el detalle
+  valiera ese riesgo/complejidad adicional.
+
+
+
+
+
+
+## 16. Adenda — ultimos huecos encontrados al reescribir la capa de servicios del frontend
+
+- **`GET /purchases/positions`** (nuevo): "mis seminarios" -- `GET /purchases`
+  devuelve compras (incluye `PENDING`, sin capital/cashback), pero el
+  frontend necesita ver sus `InvestmentPosition` ya confirmadas con esos
+  campos. Reusa el mismo DTO (`AdminSeminarResponse`) y el mismo mapeo que
+  el listado de admin (§14), solo filtrado a un usuario
+  (`PurchaseService.listMySeminars()`).
+- **`ReferralResponse`** (mis propios referidos) se extendio con
+  `referredUserId`, `bonusAmount`, `seminarsCount` -- antes solo tenia
+  `referredFullName`/`referredEmail`/`status`/fechas, sin esos tres que el
+  tipo `Referral` del frontend tambien exige. Mismo criterio de calculo que
+  `AdminReferralResponse` (§14) -- la unica diferencia real entre los dos
+  DTOs es que el de admin SI incluye `referrerId` explicito (abarca todos
+  los referentes a la vez), mientras que en "mis referidos" ese dato es
+  implicito (siempre soy yo).
