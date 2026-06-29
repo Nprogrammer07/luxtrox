@@ -891,3 +891,28 @@ también esperaba: `GET /referrals/summary`, `GET /referrals/bonuses`,
   DTOs es que el de admin SI incluye `referrerId` explicito (abarca todos
   los referentes a la vez), mientras que en "mis referidos" ese dato es
   implicito (siempre soy yo).
+
+## 17. Adenda — comisión de referido: por persona (no por venta), y tasa de Zenith al 22%
+
+Aclaración del cliente, posterior a la corrección de Fase 8:
+
+- **Una comisión por PERSONA referida, no por venta.** La Fase 8 estableció
+  que cada venta del referido se evalúa de forma independiente contra el
+  plan del referente — esto permitía que un mismo referido, comprando varias
+  veces (otro Driver, un Zenith, una renovación), generara una comisión
+  nueva en CADA compra. Eso ya no es la regla: ahora `onReferredPurchaseConfirmed()`
+  revisa primero si el `Referral` de esa persona ya quedó `RESOLVED` (por
+  cualquier compra anterior, suya, sin importar el plan) — si ya lo está,
+  la compra nueva no dispara ninguna evaluación, ni pago ni pérdida
+  registrada. El referente sigue pudiendo ganar comisiones **ilimitadas**,
+  pero de **personas distintas** — cada referido tiene su propia fila de
+  `Referral`, independiente de las demás.
+- **Tasa de Zenith: 40% → 22%.** `PlanPricing.ZENITH_REFERRAL_RATE` cambia
+  de `0.40` a `0.22`. La de Driver (9%) no cambia.
+
+Tests actualizados para reflejar ambos cambios: `ReferralServiceUnitTest`
+(nuevo caso `secondPurchaseFromSameReferredPerson_...doesNothingAtAll`) y
+`ReferralServiceTest` (el caso que antes probaba "ambas comisiones se
+ganan independientemente" se reescribió para probar lo contrario: solo la
+primera compra de una persona genera comisión; se agregó un caso nuevo
+para confirmar que sí se gana de **personas distintas**, sin límite).

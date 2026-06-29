@@ -13,10 +13,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Prueba el algoritmo de comisiones de referido -- VERSION CORREGIDA
- * (ver docs/domain-model.md adenda de Fase 8). Reemplaza por completo
- * la version de Fase 6: ya no existe "cualquier compra confirmada
- * califica, con reintento" -- ahora cada venta se evalua contra el
- * plan ESPECIFICO del referente, una sola vez, sin segunda oportunidad.
+ * (ver docs/domain-model.md adenda de Fase 8, y la adenda posterior
+ * que cambia la regla de "por venta" a "por persona"). Cada PERSONA
+ * referida se evalua una sola vez, en su PRIMERA compra confirmada,
+ * contra el plan especifico del referente -- sin segunda oportunidad,
+ * y sin volver a evaluar nada en compras posteriores de esa misma
+ * persona. El referente si puede seguir ganando comisiones de
+ * personas DISTINTAS, sin limite.
  */
 class ReferralServiceTest extends AbstractIntegrationTest {
 
@@ -96,7 +99,7 @@ class ReferralServiceTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void zenithReferral_referrerHasActiveZenithLicense_paysFortyPercentDirect() {
+    void zenithReferral_referrerHasActiveZenithLicense_paysTwentyTwoPercentDirect() {
         User referrer = createUser("refC@example.com", "REFC0001");
         User referred = createUser("refD@example.com", "REFD0001");
         Purchase referrerZenithPurchase = confirmedPurchase(referrer, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
@@ -107,7 +110,7 @@ class ReferralServiceTest extends AbstractIntegrationTest {
         referralService.onReferredPurchaseConfirmed(referredPurchase);
 
         User refreshedReferrer = userRepository.findById(referrer.getId()).orElseThrow();
-        assertThat(refreshedReferrer.getAvailableBalance()).isEqualByComparingTo("919.60"); // 2299 * 0.40
+        assertThat(refreshedReferrer.getAvailableBalance()).isEqualByComparingTo("505.78"); // 2299 * 0.22
     }
 
     @Test
@@ -232,25 +235,58 @@ class ReferralServiceTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void referrerOwningBothPlans_canEarnBothCommissionsIndependently() {
+    void referredPersonBuyingBothPlans_onlyTheFirstPurchaseGeneratesACommission() {
         User referrer = createUser("refQ@example.com", "REFQ0001");
         User referred = createUser("refR@example.com", "REFR0001");
         Purchase referrerDriverPurchase = confirmedPurchase(referrer, PlanType.DRIVER, new BigDecimal("1099.00"));
         activePosition(referrer, referrerDriverPurchase, new BigDecimal("1099.00"), BigDecimal.ZERO);
         Purchase referrerZenithPurchase = confirmedPurchase(referrer, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
         activeZenithLicense(referrer, referrerZenithPurchase);
-        linkReferral(referrer, referred);
+        Referral referral = linkReferral(referrer, referred);
 
-        // El mismo referido compra AMBOS planes -- cada venta se evalua
-        // independientemente contra el plan correspondiente del referente.
+        // La MISMA persona referida compra Driver primero -- esta SI
+        // dispara una evaluacion (98.91, avance a la posicion del
+        // referente) y deja el Referral en RESOLVED.
         Purchase referredDriverPurchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
         referralService.onReferredPurchaseConfirmed(referredDriverPurchase);
 
+        User afterDriver = userRepository.findById(referrer.getId()).orElseThrow();
+        assertThat(afterDriver.getAvailableBalance()).isEqualByComparingTo("98.91");
+
+        Referral resolvedAfterFirst = referralRepository.findById(referral.getId()).orElseThrow();
+        assertThat(resolvedAfterFirst.getStatus()).isEqualTo(ReferralStatus.RESOLVED);
+
+        // La MISMA persona compra Zenith despues -- ya esta RESOLVED,
+        // asi que esta segunda compra no dispara ninguna evaluacion
+        // nueva (la regla cambio de "por venta" a "por persona": el
+        // referente puede seguir ganando comisiones, pero solo de
+        // PERSONAS DISTINTAS, no de mas compras de la misma persona).
         Purchase referredZenithPurchase = confirmedPurchase(referred, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
         referralService.onReferredPurchaseConfirmed(referredZenithPurchase);
 
+        User afterZenith = userRepository.findById(referrer.getId()).orElseThrow();
+        assertThat(afterZenith.getAvailableBalance()).isEqualByComparingTo("98.91"); // SIN cambios, no 1018.51
+    }
+
+    @Test
+    void differentReferredPeople_eachGenerateTheirOwnCommission_unlimited() {
+        User referrer = createUser("refS@example.com", "REFS0001");
+        Purchase referrerZenithPurchase = confirmedPurchase(referrer, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
+        activeZenithLicense(referrer, referrerZenithPurchase);
+
+        // Dos personas DISTINTAS, cada una referida por el mismo referente.
+        User firstReferred = createUser("refT@example.com", "REFT0001");
+        linkReferral(referrer, firstReferred);
+        Purchase firstReferredPurchase = confirmedPurchase(firstReferred, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
+        referralService.onReferredPurchaseConfirmed(firstReferredPurchase);
+
+        User secondReferred = createUser("refU@example.com", "REFU0001");
+        linkReferral(referrer, secondReferred);
+        Purchase secondReferredPurchase = confirmedPurchase(secondReferred, PlanType.ZENITH, PlanPricing.ZENITH_PRICE);
+        referralService.onReferredPurchaseConfirmed(secondReferredPurchase);
+
         User refreshedReferrer = userRepository.findById(referrer.getId()).orElseThrow();
-        // 98.91 (Driver, avance a su posicion) + 919.60 (Zenith, directo) = 1018.51
-        assertThat(refreshedReferrer.getAvailableBalance()).isEqualByComparingTo("1018.51");
+        // 505.78 + 505.78 = 1011.56 -- DOS personas distintas, DOS comisiones completas.
+        assertThat(refreshedReferrer.getAvailableBalance()).isEqualByComparingTo("1011.56");
     }
 }

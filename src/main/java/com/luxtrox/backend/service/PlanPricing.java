@@ -22,6 +22,6 @@ public final class PlanPricing {
     /** 9% -- comisión por referir una venta de Driver (ver §7.2). */
     public static final BigDecimal DRIVER_REFERRAL_RATE = new BigDecimal("0.09");
 
-    /** 40% -- comisión por referir una venta de Zenith (ver §7.2). */
-    public static final BigDecimal ZENITH_REFERRAL_RATE = new BigDecimal("0.40");
+    /** 22% -- comisión por referir una venta de Zenith (antes 40%, ver adenda correspondiente en domain-model.md). */
+    public static final BigDecimal ZENITH_REFERRAL_RATE = new BigDecimal("0.22");
 }

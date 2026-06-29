@@ -19,10 +19,11 @@ import java.util.Optional;
 
 /**
  * Implementa el algoritmo de comisiones de referido -- VERSION
- * CORREGIDA (ver docs/domain-model.md adenda de Fase 8). Reemplaza
- * por completo el diseno anterior (Fase 6), que pagaba la comision
- * completa a cualquier referente con AL MENOS UNA compra confirmada
- * de cualquier tipo, con reintento si todavia no calificaba.
+ * CORREGIDA (ver docs/domain-model.md adenda de Fase 8, y la adenda
+ * posterior que cambia la regla de "por venta" a "por persona").
+ * Reemplaza por completo el diseno anterior (Fase 6), que pagaba la
+ * comision completa a cualquier referente con AL MENOS UNA compra
+ * confirmada de cualquier tipo, con reintento si todavia no calificaba.
  *
  * Regla real del negocio (aclarada por el cliente):
  *   - Comision por venta de DRIVER: solo se paga si el referente tiene
@@ -35,13 +36,17 @@ import java.util.Optional;
  *     available_balance, solo si el referente tiene una licencia
  *     Zenith ACTIVE en este momento. Si no, se pierde completa.
  *   - La evaluacion es UNICA: en el momento exacto en que se confirma
- *     la compra del referido. Sin reintentos, sin espera -- si el
- *     referente no califica en ese instante, la comision se pierde
- *     para siempre. Por eso ya NO existe un disparador equivalente a
- *     "onReferrerPurchaseConfirmed".
- *   - Cada compra del referido se evalua de forma INDEPENDIENTE: si
- *     refiere tanto un Driver como un Zenith, cada venta genera su
- *     propia evaluacion contra el plan correspondiente del referente.
+ *     la PRIMERA compra del referido. Sin reintentos, sin espera --
+ *     si el referente no califica en ese instante, la comision se
+ *     pierde para siempre.
+ *   - UNA evaluacion por PERSONA referida, no por venta: una vez que
+ *     el Referral de esa persona queda RESOLVED (la primera vez que
+ *     onReferredPurchaseConfirmed corre para ella, sin importar el
+ *     resultado -- pagada o perdida), CUALQUIER compra posterior de
+ *     esa MISMA persona (otro Driver, un Zenith, una renovacion) no
+ *     dispara ninguna evaluacion nueva. El referente SI puede seguir
+ *     ganando comisiones ilimitadas, pero de PERSONAS DISTINTAS --
+ *     cada referido tiene su propia fila de Referral, independiente.
  */
 @Service
 public class ReferralService {
@@ -85,7 +90,14 @@ public class ReferralService {
 
     /**
      * Unico disparador que queda: la compra del REFERIDO se confirma.
-     * Evalua y resuelve la comision DE INMEDIATO, sin reintentos.
+     * Evalua y resuelve la comision DE INMEDIATO, sin reintentos --
+     * pero SOLO la primera vez para esta persona referida. Si su
+     * Referral ya quedo RESOLVED por una compra anterior (suya
+     * misma), esta compra nueva no dispara nada -- ni pago ni
+     * registro de perdida, simplemente no aplica. Sin esto, un mismo
+     * referido comprando varias veces (otro Driver, un Zenith, una
+     * renovacion) generaria una comision nueva en CADA compra, que ya
+     * no es la regla del negocio.
      */
     @Transactional
     public void onReferredPurchaseConfirmed(Purchase confirmedPurchase) {
@@ -98,13 +110,13 @@ public class ReferralService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Usuario " + referredUser.getId() + " tiene referredBy pero no existe su Referral"));
 
+        if (referral.getStatus() == ReferralStatus.RESOLVED) {
+            return; // ya se evaluo (pagada o perdida) con una compra anterior de esta misma persona
+        }
+
         if (referral.getQualifiedAt() == null) {
             referral.setQualifiedAt(OffsetDateTime.now());
         }
-        // Nota: si el mismo referido compra mas de un plan, este campo
-        // (y targetPosition mas abajo) solo conserva el snapshot de la
-        // evaluacion MAS RECIENTE -- el historial real, completo, vive
-        // en cashback_transactions y audit_logs, que son append-only.
         referral.setTriggeringPurchase(confirmedPurchase);
 
         if (confirmedPurchase.getPlanType() == PlanType.DRIVER) {

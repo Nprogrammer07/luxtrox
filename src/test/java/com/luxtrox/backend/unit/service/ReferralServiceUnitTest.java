@@ -26,12 +26,11 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unitario puro con Mockito -- version corregida (ver
- * docs/domain-model.md adenda de Fase 8). El diseno anterior (que
- * pagaba a cualquier referente con una compra confirmada de cualquier
- * tipo, con reintento) quedo completamente reemplazado: ahora la
- * comision de Driver requiere posicion Driver propia activa, la de
- * Zenith requiere licencia Zenith propia ACTIVE, y la evaluacion es
- * unica -- sin reintentos.
+ * docs/domain-model.md adenda de Fase 8, y la adenda posterior que
+ * cambia la regla de "por venta" a "por persona"). La comision de
+ * Driver requiere posicion Driver propia activa, la de Zenith
+ * requiere licencia Zenith propia ACTIVE, la evaluacion es unica por
+ * PERSONA referida (no por venta), y sin reintentos.
  */
 @ExtendWith(MockitoExtension.class)
 class ReferralServiceUnitTest {
@@ -105,9 +104,9 @@ class ReferralServiceUnitTest {
     }
 
     @Test
-    void calculateCommission_zenith_isFortyPercent() {
+    void calculateCommission_zenith_isTwentyTwoPercent() {
         Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
-        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("919.60");
+        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("505.78");
     }
 
     // ---------- onReferredPurchaseConfirmed() -- sin referente ----------
@@ -220,7 +219,7 @@ class ReferralServiceUnitTest {
 
     @Test
     void zenithSale_referrerHasActiveLicense_paysFullyAndDirectly() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00")); // comision = 919.60
+        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00")); // comision = 505.78
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
@@ -232,12 +231,12 @@ class ReferralServiceUnitTest {
 
         ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
         verify(cashbackTransactionRepository, times(1)).save(txCaptor.capture());
-        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("919.60");
+        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("505.78");
         assertThat(txCaptor.getValue().getType()).isEqualTo(CashbackTransactionType.REFERRAL_BONUS_DIRECT);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("919.60");
+        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("505.78");
     }
 
     // ---------- ZENITH: SIN licencia activa (nunca tuvo, o la tiene EXPIRED) -- se pierde TODO ----------
@@ -254,7 +253,25 @@ class ReferralServiceUnitTest {
 
         verifyNoInteractions(cashbackTransactionRepository, userRepository, notificationEmailService);
         verify(auditService).recordSystemAction(eq("User"), any(),
-                eq("REFERRAL_COMMISSION_FORFEITED_ZENITH_SIN_LICENCIA_ACTIVA"), any(), eq(new BigDecimal("919.60")));
+                eq("REFERRAL_COMMISSION_FORFEITED_ZENITH_SIN_LICENCIA_ACTIVA"), any(), eq(new BigDecimal("505.78")));
+    }
+
+    // ---------- Una sola evaluacion por PERSONA referida, no por venta ----------
+
+    @Test
+    void secondPurchaseFromSameReferredPerson_referralAlreadyResolved_doesNothingAtAll() {
+        Purchase secondPurchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
+        Referral alreadyResolved = newReferral();
+        alreadyResolved.setStatus(ReferralStatus.RESOLVED); // la PRIMERA compra de esta persona ya se evaluo
+
+        when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(alreadyResolved));
+
+        service.onReferredPurchaseConfirmed(secondPurchase);
+
+        // Nada se evalua de nuevo -- ni pago, ni perdida registrada, ni se vuelve a guardar el Referral.
+        verifyNoInteractions(zenithLicenseRepository, positionRepository, cashbackTransactionRepository,
+                userRepository, notificationEmailService, auditService);
+        verify(referralRepository, never()).save(any());
     }
 
     // ---------- Fallo de email no tumba un pago ya resuelto ----------
