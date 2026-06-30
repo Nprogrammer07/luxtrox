@@ -1,5 +1,6 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.user.ManualCreditRequest;
 import com.luxtrox.backend.dto.user.UpdateProfileRequest;
 import com.luxtrox.backend.dto.user.UpdateUserStatusRequest;
 import com.luxtrox.backend.dto.user.UserProfileResponse;
@@ -56,5 +57,12 @@ public class UserController {
     public UserProfileResponse updateStatus(@PathVariable UUID id,
                                              @Valid @RequestBody UpdateUserStatusRequest request) {
         return userService.updateUserStatus(id, request);
+    }
+
+    @PostMapping("/admin/users/{id}/credit")
+    @Operation(summary = "Enviar dinero manualmente a un usuario (rendimiento o comision) -- acredita directo a available_balance")
+    public UserProfileResponse manualCredit(@PathVariable UUID id,
+                                             @Valid @RequestBody ManualCreditRequest request) {
+        return userService.manualCredit(id, request);
     }
 }

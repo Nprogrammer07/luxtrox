@@ -144,8 +144,8 @@ class AdminListingsApiTest extends AbstractApiTest {
                 .when().get("/admin/referrals")
                 .then().statusCode(200)
                 .body("size()", greaterThanOrEqualTo(1))
-                .body("findAll { it.referredUserEmail == '%s' }.size()".formatted(referredEmail), equalTo(1))
-                .body("findAll { it.referredUserEmail == '%s' }[0].status".formatted(referredEmail), equalTo("active"));
+                .body("findAll { it.referredEmail == '%s' }.size()".formatted(referredEmail), equalTo(1))
+                .body("findAll { it.referredEmail == '%s' }[0].status".formatted(referredEmail), equalTo("active"));
     }
 
     @Test

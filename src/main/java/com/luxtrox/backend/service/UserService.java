@@ -1,11 +1,15 @@
 package com.luxtrox.backend.service;
 
+import com.luxtrox.backend.dto.user.ManualCreditRequest;
 import com.luxtrox.backend.dto.user.UpdateProfileRequest;
 import com.luxtrox.backend.dto.user.UpdateUserStatusRequest;
 import com.luxtrox.backend.dto.user.UserProfileResponse;
+import com.luxtrox.backend.entity.CashbackTransaction;
 import com.luxtrox.backend.entity.User;
+import com.luxtrox.backend.entity.enums.CashbackTransactionType;
 import com.luxtrox.backend.entity.enums.UserStatus;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
+import com.luxtrox.backend.repository.CashbackTransactionRepository;
 import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import org.springframework.stereotype.Service;
@@ -43,10 +47,13 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final InvestmentPositionRepository positionRepository;
+    private final CashbackTransactionRepository cashbackTransactionRepository;
 
-    public UserService(UserRepository userRepository, InvestmentPositionRepository positionRepository) {
+    public UserService(UserRepository userRepository, InvestmentPositionRepository positionRepository,
+                       CashbackTransactionRepository cashbackTransactionRepository) {
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
+        this.cashbackTransactionRepository = cashbackTransactionRepository;
     }
 
     @Transactional(readOnly = true)
@@ -80,6 +87,27 @@ public class UserService {
         User user = findOrThrow(userId);
         user.setStatus(request.status());
         userRepository.save(user);
+        return toResponse(user);
+    }
+
+    /**
+     * Credito manual del admin -- acredita amount a available_balance
+     * del usuario y registra la transaccion como MANUAL_CREDIT para
+     * auditoria completa. reason (PERFORMANCE/COMMISSION) queda en las
+     * notes de la transaccion; el frontend lo muestra en la fila del
+     * historial del admin.
+     */
+    @Transactional
+    public UserProfileResponse manualCredit(UUID userId, ManualCreditRequest request) {
+        User user = findOrThrow(userId);
+
+        user.setAvailableBalance(user.getAvailableBalance().add(request.amount()));
+        userRepository.save(user);
+
+        CashbackTransaction tx = new CashbackTransaction(user, CashbackTransactionType.MANUAL_CREDIT, request.amount());
+        tx.setNotes("[" + request.reason().name() + "] " + request.notes());
+        cashbackTransactionRepository.save(tx);
+
         return toResponse(user);
     }
 

@@ -49,6 +49,10 @@ public class CashbackTransaction {
     @Column(name = "effective_rate", precision = 5, scale = 2)
     private BigDecimal effectiveRate;
 
+    /** Solo para MANUAL_CREDIT -- motivo/descripcion del credito enviado por el admin. */
+    @Column(name = "notes", length = 500)
+    private String notes;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "source_performance_id")
     private MonthlyPerformance sourcePerformance;
@@ -83,6 +87,13 @@ public class CashbackTransaction {
     public CashbackTransaction(User user, BigDecimal amount) {
         this.user = user;
         this.type = CashbackTransactionType.REFERRAL_BONUS_DIRECT;
+        this.amount = amount;
+    }
+
+    /** Para creditos manuales del admin -- tipo explicito, sin posicion asociada. */
+    public CashbackTransaction(User user, CashbackTransactionType type, BigDecimal amount) {
+        this.user = user;
+        this.type = type;
         this.amount = amount;
     }
 
@@ -152,5 +163,13 @@ public class CashbackTransaction {
 
     public OffsetDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public String getNotes() {
+        return notes;
+    }
+
+    public void setNotes(String notes) {
+        this.notes = notes;
     }
 }

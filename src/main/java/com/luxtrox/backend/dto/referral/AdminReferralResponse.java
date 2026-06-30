@@ -9,25 +9,17 @@ import java.util.UUID;
  * "quien es el referente" es implicito) -- el admin necesita ver
  * referrerId explicito, abarca TODOS los referentes a la vez.
  *
- * status: PENDING_PURCHASE -> "active" (la relacion sigue viva, el
- * referido todavia puede comprar), RESOLVED -> "inactive" (la
- * evaluacion ya se hizo, pagada o perdida -- el detalle vive en
- * cashback_transactions/audit_logs, no en este enum). Interpretacion
- * propia: el tipo `Referral` del frontend solo admite ese binario, el
- * backend tiene un enum de 4 valores con mas matiz (ver ReferralStatus,
- * dos de ellos @Deprecated).
- *
- * bonusAmount: suma de CashbackTransaction.amount con sourceReferral
- * apuntando a esta fila -- "cuanto se le pago efectivamente por esta
- * referencia" (puede ser 0 si todavia esta PENDING_PURCHASE, o si se
- * perdio/forfeited).
+ * NOTA: los nombres referredFullName / referredEmail coinciden
+ * deliberadamente con ReferralResponse (endpoint del usuario) para
+ * que el frontend pueda reutilizar el mismo mapper (mapBackendReferral
+ * en referral.service.ts) sin distincion entre los dos endpoints.
  */
 public record AdminReferralResponse(
         UUID id,
         UUID referrerId,
         UUID referredUserId,
-        String referredUserName,
-        String referredUserEmail,
+        String referredFullName,
+        String referredEmail,
         BigDecimal bonusAmount,
         String status,
         OffsetDateTime joinedAt,

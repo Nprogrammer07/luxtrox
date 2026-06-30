@@ -7,6 +7,7 @@ import com.luxtrox.backend.entity.Role;
 import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.UserStatus;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
+import com.luxtrox.backend.repository.CashbackTransactionRepository;
 import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.service.UserService;
@@ -33,13 +34,14 @@ class UserServiceUnitTest {
 
     @Mock private UserRepository userRepository;
     @Mock private InvestmentPositionRepository positionRepository;
+    @Mock private CashbackTransactionRepository cashbackTransactionRepository;
 
     private UserService service;
     private User user;
 
     @BeforeEach
     void setUp() {
-        service = new UserService(userRepository, positionRepository);
+        service = new UserService(userRepository, positionRepository, cashbackTransactionRepository);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos Perez", "carlos@example.com", "+1111", "hash", role, "CARLOS01");
