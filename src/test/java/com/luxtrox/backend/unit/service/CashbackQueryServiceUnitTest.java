@@ -46,7 +46,7 @@ class CashbackQueryServiceUnitTest {
         setId(user, UUID.randomUUID());
         user.setAvailableBalance(new BigDecimal("500.00"));
 
-        lenient().when(transactionRepository.sumByPositionUserAndTypeIn(any(), any())).thenReturn(BigDecimal.ZERO);
+        lenient().when(transactionRepository.sumAllCashbackForUser(any())).thenReturn(BigDecimal.ZERO);
         lenient().when(positionRepository.sumTargetCashbackByUser(any())).thenReturn(BigDecimal.ZERO);
         lenient().when(positionRepository.countByUser(any())).thenReturn(0L);
     }
@@ -81,8 +81,8 @@ class CashbackQueryServiceUnitTest {
     // ---------- getSummary() ----------
 
     @Test
-    void getSummary_mapsEachFieldFromItsSource_totalGeneratedEqualsReceived() {
-        when(transactionRepository.sumByPositionUserAndTypeIn(eq(user), anyTypes())).thenReturn(new BigDecimal("500.00"));
+    void getSummary_includesPerformanceAndCommissionsAndManualCredits_inTotalGenerated() {
+        when(transactionRepository.sumAllCashbackForUser(user)).thenReturn(new BigDecimal("500.00"));
         when(positionRepository.sumTargetCashbackByUser(user)).thenReturn(new BigDecimal("2000.00"));
         when(positionRepository.countByUser(user)).thenReturn(2L);
 
@@ -107,10 +107,10 @@ class CashbackQueryServiceUnitTest {
     // ---------- getHistory() ----------
 
     @Test
-    void getHistory_mapsTransactionsToRecords() {
+    void getHistory_mapsPositionTransactionsToRecords() {
         InvestmentPosition position = positionFor(user);
         CashbackTransaction tx = transactionFor(position, new BigDecimal("109.90"), 2026, 3);
-        when(transactionRepository.findByPositionUserAndTypeIn(eq(user), anyTypes())).thenReturn(List.of(tx));
+        when(transactionRepository.findAllCashbackForUser(user)).thenReturn(List.of(tx));
 
         List<CashbackRecordResponse> history = service.getHistory(user);
 
@@ -122,6 +122,23 @@ class CashbackQueryServiceUnitTest {
         assertThat(record.month()).isEqualTo(3);
         assertThat(record.year()).isEqualTo(2026);
         assertThat(record.status()).isEqualTo("PAID");
+    }
+
+    @Test
+    void getHistory_manualCreditWithNoPosition_seminarIdIsNull_userIdFromDirectUser() {
+        CashbackTransaction tx = new CashbackTransaction(user, CashbackTransactionType.MANUAL_CREDIT, new BigDecimal("50.00"));
+        setId(tx, UUID.randomUUID());
+        when(transactionRepository.findAllCashbackForUser(user)).thenReturn(List.of(tx));
+
+        List<CashbackRecordResponse> history = service.getHistory(user);
+
+        assertThat(history).hasSize(1);
+        CashbackRecordResponse record = history.get(0);
+        assertThat(record.userId()).isEqualTo(user.getId());
+        assertThat(record.seminarId()).isNull();  // no position
+        assertThat(record.amount()).isEqualByComparingTo("50.00");
+        assertThat(record.month()).isNull();       // no sourcePerformance
+        assertThat(record.year()).isNull();
     }
 
     // ---------- getMonthlyChart() ----------

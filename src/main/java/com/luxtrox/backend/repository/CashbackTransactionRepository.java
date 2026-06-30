@@ -65,6 +65,19 @@ public interface CashbackTransactionRepository extends JpaRepository<CashbackTra
     List<Object[]> sumByPositionUserAndTypeInGroupedByMonth(@Param("user") User user,
                                                               @Param("types") List<CashbackTransactionType> types);
 
+    /** Para CashbackQueryService.getSummary() -- total de TODOS los tipos (rendimiento + comisiones + creditos manuales). */
+    @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c " +
+            "LEFT JOIN c.position pos " +
+            "WHERE c.user = :user OR pos.user = :user")
+    BigDecimal sumAllCashbackForUser(@Param("user") User user);
+
+    /** Para CashbackQueryService.getHistory() -- historial completo de todos los tipos de un usuario. */
+    @Query("SELECT c FROM CashbackTransaction c " +
+            "LEFT JOIN c.position pos " +
+            "WHERE c.user = :user OR pos.user = :user " +
+            "ORDER BY c.createdAt DESC")
+    List<CashbackTransaction> findAllCashbackForUser(@Param("user") User user);
+
     /** Para AdminCashbackController -- listado de TODAS las transacciones de cashback, sin filtrar por usuario. */
     @Query("SELECT c FROM CashbackTransaction c WHERE c.type IN :types ORDER BY c.createdAt DESC")
     List<CashbackTransaction> findByTypeIn(@Param("types") List<CashbackTransactionType> types);

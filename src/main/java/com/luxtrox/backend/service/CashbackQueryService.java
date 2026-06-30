@@ -43,8 +43,14 @@ import java.util.Map;
 @Service
 public class CashbackQueryService {
 
-    /** Tipos que representan cashback de POSICION -- excluye REFERRAL_BONUS* a proposito (dominio separado en el frontend). */
-    private static final List<CashbackTransactionType> CASHBACK_TYPES =
+    /**
+     * Solo para la grafica mensual (/cashback/monthly) -- excluye los
+     * tipos sin sourcePerformance (REFERRAL_BONUS, REFERRAL_BONUS_DIRECT,
+     * MANUAL_CREDIT) porque no tienen año/mes de rendimiento asociado
+     * y romperían el GROUP BY de la grafica. El resumen y el historial
+     * usan sumAllCashbackForUser/findAllCashbackForUser en su lugar.
+     */
+    private static final List<CashbackTransactionType> PERFORMANCE_TYPES =
             List.of(CashbackTransactionType.MONTHLY_PERFORMANCE, CashbackTransactionType.MONTHLY_PERFORMANCE_REASSIGNED);
 
     private static final int CHART_WINDOW_MONTHS = 6;
@@ -58,33 +64,49 @@ public class CashbackQueryService {
         this.transactionRepository = transactionRepository;
     }
 
+    /**
+     * Resumen de cashback: incluye rendimiento mensual + comisiones de
+     * referido (REFERRAL_BONUS / REFERRAL_BONUS_DIRECT) + creditos
+     * manuales del admin (MANUAL_CREDIT) en totalGenerated. Antes solo
+     * contaba MONTHLY_PERFORMANCE*, lo que dejaba las comisiones fuera
+     * del "cashback generado" y del "cashback restante por pagar",
+     * a pesar de que son dinero que la plataforma ya le ha pagado al
+     * usuario.
+     */
     @Transactional(readOnly = true)
     public CashbackSummaryResponse getSummary(User user) {
-        BigDecimal totalReceived = transactionRepository.sumByPositionUserAndTypeIn(user, CASHBACK_TYPES);
+        BigDecimal totalGenerated = transactionRepository.sumAllCashbackForUser(user);
         BigDecimal targetFinal = positionRepository.sumTargetCashbackByUser(user);
         long seminarsCount = positionRepository.countByUser(user);
 
         return new CashbackSummaryResponse(
-                totalReceived,        // totalGenerated == totalReceived en este backend, ver javadoc de la clase DTO
-                totalReceived,
+                totalGenerated,
+                totalGenerated,
                 user.getAvailableBalance(),
                 targetFinal,
-                progressPercentage(totalReceived, targetFinal),
+                progressPercentage(totalGenerated, targetFinal),
                 seminarsCount
         );
     }
 
+    /**
+     * Historial de cashback: incluye TODOS los tipos (rendimiento +
+     * comisiones + creditos manuales). Antes filtraba por CASHBACK_TYPES
+     * = [MONTHLY_PERFORMANCE, MONTHLY_PERFORMANCE_REASSIGNED], dejando
+     * las comisiones y creditos fuera del historial del usuario.
+     */
     @Transactional(readOnly = true)
     public List<CashbackRecordResponse> getHistory(User user) {
-        return transactionRepository.findByPositionUserAndTypeIn(user, CASHBACK_TYPES).stream()
+        return transactionRepository.findAllCashbackForUser(user).stream()
                 .map(CashbackRecordResponse::from)
                 .toList();
     }
 
+    /** Grafica mensual: solo rendimiento (tiene sourcePerformance para agrupar). */
     @Transactional(readOnly = true)
     public List<CashbackMonthlyResponse> getMonthlyChart(User user) {
         Map<String, BigDecimal> byMonth = new LinkedHashMap<>();
-        for (Object[] row : transactionRepository.sumByPositionUserAndTypeInGroupedByMonth(user, CASHBACK_TYPES)) {
+        for (Object[] row : transactionRepository.sumByPositionUserAndTypeInGroupedByMonth(user, PERFORMANCE_TYPES)) {
             Integer year = (Integer) row[0];
             Integer month = (Integer) row[1];
             byMonth.put(monthKey(year, month), toBigDecimal(row[2]));
@@ -94,7 +116,7 @@ public class CashbackQueryService {
 
     @Transactional(readOnly = true)
     public List<CashbackRecordResponse> getAllCashback() {
-        return transactionRepository.findByTypeIn(CASHBACK_TYPES).stream()
+        return transactionRepository.findByTypeIn(PERFORMANCE_TYPES).stream()
                 .map(CashbackRecordResponse::from)
                 .toList();
     }
