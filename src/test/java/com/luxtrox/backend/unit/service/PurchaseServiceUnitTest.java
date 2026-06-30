@@ -238,4 +238,76 @@ class PurchaseServiceUnitTest {
         verify(auditService).recordSystemAction(eq("Purchase"), any(), eq("INVOICE_OR_EMAIL_FAILED"), any(), any());
         verify(notificationEmailService, never()).sendPurchaseConfirmedEmail(any(), any(), any());
     }
+
+    // ---------- rejectPurchase() ----------
+
+    @Test
+    void rejectPurchase_pending_setsRejectedAndAudits() {
+        Purchase purchase = new Purchase(user, PlanType.DRIVER, 1, PlanPricing.DRIVER_PACKAGE_PRICE, PaymentMethod.ALTERNATIVE);
+        UUID purchaseId = UUID.randomUUID();
+        setId(purchase, purchaseId);
+        when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
+
+        Purchase result = purchaseService.rejectPurchase(purchaseId);
+
+        assertThat(result.getStatus()).isEqualTo(PurchaseStatus.REJECTED);
+        verify(purchaseRepository).save(purchase);
+        verify(auditService).record(user, "Purchase", purchaseId, "PURCHASE_REJECTED",
+                PurchaseStatus.PENDING, PurchaseStatus.REJECTED);
+        // rechazar NUNCA debe crear una posicion, licencia, ni evaluar comision de referido
+        verify(positionRepository, never()).save(any());
+        verify(zenithLicenseRepository, never()).save(any());
+        verify(referralService, never()).onReferredPurchaseConfirmed(any());
+    }
+
+    @Test
+    void rejectPurchase_alreadyConfirmed_throwsAndNeverSaves() {
+        Purchase purchase = new Purchase(user, PlanType.DRIVER, 1, PlanPricing.DRIVER_PACKAGE_PRICE, PaymentMethod.ALTERNATIVE);
+        purchase.setStatus(PurchaseStatus.CONFIRMED);
+        UUID purchaseId = UUID.randomUUID();
+        setId(purchase, purchaseId);
+        when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
+
+        assertThrows(BusinessRuleException.class, () -> purchaseService.rejectPurchase(purchaseId));
+
+        verify(purchaseRepository, never()).save(any());
+        verify(auditService, never()).record(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectPurchase_unknownId_throwsResourceNotFound() {
+        UUID purchaseId = UUID.randomUUID();
+        when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () -> purchaseService.rejectPurchase(purchaseId));
+    }
+
+    // ---------- listAllPurchases() ----------
+
+    @Test
+    void listAllPurchases_mapsUserFieldsCorrectly() {
+        Purchase purchase = new Purchase(user, PlanType.ZENITH, 1, PlanPricing.ZENITH_PRICE, PaymentMethod.ALTERNATIVE);
+        setId(purchase, UUID.randomUUID());
+        when(purchaseRepository.findAll()).thenReturn(java.util.List.of(purchase));
+
+        var result = purchaseService.listAllPurchases(null);
+
+        assertThat(result).hasSize(1);
+        var dto = result.get(0);
+        assertThat(dto.userId()).isEqualTo(user.getId());
+        assertThat(dto.userName()).isEqualTo("Carlos");
+        assertThat(dto.userEmail()).isEqualTo("carlos@example.com");
+        assertThat(dto.planType()).isEqualTo(PlanType.ZENITH);
+        assertThat(dto.status()).isEqualTo(PurchaseStatus.PENDING);
+    }
+
+    @Test
+    void listAllPurchases_withStatusFilter_delegatesToFindByStatus_notFindAll() {
+        when(purchaseRepository.findByStatus(PurchaseStatus.PENDING)).thenReturn(java.util.List.of());
+
+        purchaseService.listAllPurchases(PurchaseStatus.PENDING);
+
+        verify(purchaseRepository).findByStatus(PurchaseStatus.PENDING);
+        verify(purchaseRepository, never()).findAll();
+    }
 }

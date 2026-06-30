@@ -1,8 +1,10 @@
 package com.luxtrox.backend.controller;
 
+import com.luxtrox.backend.dto.purchase.AdminPurchaseResponse;
 import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.entity.Purchase;
+import com.luxtrox.backend.entity.enums.PurchaseStatus;
 import com.luxtrox.backend.service.PurchaseService;
 import com.luxtrox.backend.service.ZenithService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,7 +23,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/admin/purchases")
-@Tag(name = "Admin - Purchases", description = "Listado, confirmacion de compras, y renovacion de Zenith")
+@Tag(name = "Admin - Purchases", description = "Listado, aprobacion/rechazo de compras, y renovacion de Zenith")
 public class AdminPurchaseController {
 
     private final PurchaseService purchaseService;
@@ -38,16 +40,31 @@ public class AdminPurchaseController {
         return purchaseService.listAllSeminars();
     }
 
+    /**
+     * Distinto de GET /admin/purchases -- esto incluye PENDING (que
+     * es justo lo que el admin necesita revisar para aprobar o
+     * rechazar; listSeminars() solo puede mostrar lo YA confirmado,
+     * porque la InvestmentPosition ni siquiera existe en PENDING).
+     */
+    @GetMapping("/requests")
+    @Operation(summary = "Listar todas las compras (cualquier plan, cualquier status) para aprobar/rechazar")
+    public List<AdminPurchaseResponse> listPurchaseRequests(@RequestParam(required = false) PurchaseStatus status) {
+        return purchaseService.listAllPurchases(status);
+    }
+
     @PostMapping("/{purchaseId}/confirm")
     @Operation(summary = "Confirmar una compra ya pagada (crea posicion o licencia segun el plan). "
             + "Solo deberia usarse para compras ALTERNATIVE -- las CRYPTO se confirman solas via webhook.")
     public ResponseEntity<PurchaseResponse> confirm(@PathVariable UUID purchaseId) {
         Purchase purchase = purchaseService.confirmPurchase(purchaseId);
-        return ResponseEntity.ok(new PurchaseResponse(
-                purchase.getId(), purchase.getPlanType(), purchase.getPackageQuantity(),
-                purchase.getTotalAmount(), purchase.getPaymentMethod(), purchase.getStatus(),
-                purchase.getCreatedAt(), purchase.getConfirmedAt(), null
-        ));
+        return ResponseEntity.ok(toResponse(purchase));
+    }
+
+    @PostMapping("/{purchaseId}/reject")
+    @Operation(summary = "Rechazar una compra PENDING -- no reversible, no aplica a compras ya CONFIRMED")
+    public ResponseEntity<PurchaseResponse> reject(@PathVariable UUID purchaseId) {
+        Purchase purchase = purchaseService.rejectPurchase(purchaseId);
+        return ResponseEntity.ok(toResponse(purchase));
     }
 
     @PostMapping("/zenith-licenses/{licenseId}/renew")
@@ -61,5 +78,13 @@ public class AdminPurchaseController {
     @Operation(summary = "Job: marcar como EXPIRED las licencias Zenith vencidas sin renovar")
     public ResponseEntity<Integer> expireOverdueZenithLicenses() {
         return ResponseEntity.ok(zenithService.expireOverdueLicenses());
+    }
+
+    private PurchaseResponse toResponse(Purchase purchase) {
+        return new PurchaseResponse(
+                purchase.getId(), purchase.getPlanType(), purchase.getPackageQuantity(),
+                purchase.getTotalAmount(), purchase.getPaymentMethod(), purchase.getStatus(),
+                purchase.getCreatedAt(), purchase.getConfirmedAt(), null
+        );
     }
 }

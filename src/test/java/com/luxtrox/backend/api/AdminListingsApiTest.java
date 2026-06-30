@@ -174,4 +174,85 @@ class AdminListingsApiTest extends AbstractApiTest {
                 .body("size()", equalTo(1))
                 .body("[0].status", equalTo("active"));
     }
+
+    @Test
+    void purchaseRequestsListing_resolvesLazyUserChain_includesPendingOnes() {
+        String adminEmail = "reqadmin" + uniqueSuffix() + "@example.com";
+        String adminToken = register(adminEmail, null);
+        promoteToAdmin(adminEmail);
+
+        String userToken = register("requser" + uniqueSuffix() + "@example.com", null);
+
+        given().header("Authorization", "Bearer " + userToken)
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"planType": "DRIVER", "packageQuantity": 1, "paymentMethod": "ALTERNATIVE"}
+                        """)
+                .when().post("/purchases")
+                .then().statusCode(200);
+
+        given().header("Authorization", "Bearer " + adminToken)
+                .when().get("/admin/purchases/requests")
+                .then().statusCode(200)
+                .body("findAll { it.status == 'PENDING' }.size()", greaterThanOrEqualTo(1));
+
+        given().header("Authorization", "Bearer " + adminToken)
+                .queryParam("status", "PENDING")
+                .when().get("/admin/purchases/requests")
+                .then().statusCode(200)
+                .body("every { it.status == 'PENDING' }", equalTo(true));
+    }
+
+    @Test
+    void rejectPurchase_pendingPurchase_changesStatusToRejected() {
+        String adminEmail = "rejadmin" + uniqueSuffix() + "@example.com";
+        String adminToken = register(adminEmail, null);
+        promoteToAdmin(adminEmail);
+
+        String userToken = register("rejuser" + uniqueSuffix() + "@example.com", null);
+
+        String purchaseId = given().header("Authorization", "Bearer " + userToken)
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"planType": "DRIVER", "packageQuantity": 1, "paymentMethod": "ALTERNATIVE"}
+                        """)
+                .when().post("/purchases")
+                .then().statusCode(200).extract().path("id");
+
+        given().header("Authorization", "Bearer " + adminToken)
+                .when().post("/admin/purchases/" + purchaseId + "/reject")
+                .then().statusCode(200)
+                .body("status", equalTo("REJECTED"));
+
+        // una compra ya rechazada nunca aparece en /purchases/positions (nunca genero InvestmentPosition)
+        given().header("Authorization", "Bearer " + userToken)
+                .when().get("/purchases/positions")
+                .then().statusCode(200)
+                .body("size()", equalTo(0));
+    }
+
+    @Test
+    void rejectPurchase_alreadyConfirmed_returns422() {
+        String adminEmail = "rejconfadmin" + uniqueSuffix() + "@example.com";
+        String adminToken = register(adminEmail, null);
+        promoteToAdmin(adminEmail);
+
+        String userToken = register("rejconfuser" + uniqueSuffix() + "@example.com", null);
+
+        String purchaseId = given().header("Authorization", "Bearer " + userToken)
+                .contentType(ContentType.JSON)
+                .body("""
+                        {"planType": "DRIVER", "packageQuantity": 1, "paymentMethod": "ALTERNATIVE"}
+                        """)
+                .when().post("/purchases")
+                .then().statusCode(200).extract().path("id");
+
+        given().header("Authorization", "Bearer " + adminToken)
+                .when().post("/admin/purchases/" + purchaseId + "/confirm")
+                .then().statusCode(200);
+
+        given().header("Authorization", "Bearer " + adminToken)
+                .when().post("/admin/purchases/" + purchaseId + "/reject")
+                .then().statusCode(422);
+    }
 }

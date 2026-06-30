@@ -3,6 +3,7 @@ package com.luxtrox.backend.controller;
 import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.CreatePurchaseRequest;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
+import com.luxtrox.backend.dto.purchase.ZenithLicenseResponse;
 import com.luxtrox.backend.entity.Purchase;
 import com.luxtrox.backend.entity.enums.PaymentMethod;
 import com.luxtrox.backend.entity.enums.PlanType;
@@ -10,6 +11,7 @@ import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
 import com.luxtrox.backend.service.AlternativePaymentService;
 import com.luxtrox.backend.service.PurchaseService;
+import com.luxtrox.backend.service.ZenithService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,12 +29,14 @@ public class PurchaseController {
     private final PurchaseService purchaseService;
     private final PurchaseRepository purchaseRepository;
     private final AlternativePaymentService alternativePaymentService;
+    private final ZenithService zenithService;
 
     public PurchaseController(PurchaseService purchaseService, PurchaseRepository purchaseRepository,
-                               AlternativePaymentService alternativePaymentService) {
+                               AlternativePaymentService alternativePaymentService, ZenithService zenithService) {
         this.purchaseService = purchaseService;
         this.purchaseRepository = purchaseRepository;
         this.alternativePaymentService = alternativePaymentService;
+        this.zenithService = zenithService;
     }
 
     @PostMapping
@@ -69,6 +73,12 @@ public class PurchaseController {
             + "distinto de GET /purchases, que devuelve compras (incluye PENDING, sin capital/cashback)")
     public List<AdminSeminarResponse> myPositions(@AuthenticationPrincipal CustomUserPrincipal principal) {
         return purchaseService.listMySeminars(principal.getUser());
+    }
+
+    @GetMapping("/zenith-licenses")
+    @Operation(summary = "Listar mis licencias Zenith")
+    public List<ZenithLicenseResponse> myZenithLicenses(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return zenithService.listMyLicenses(principal.getUser());
     }
 
     private PurchaseResponse toResponse(Purchase purchase, String cryptoInvoiceUrl) {

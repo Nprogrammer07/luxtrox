@@ -4,6 +4,7 @@ import com.luxtrox.backend.entity.*;
 import com.luxtrox.backend.entity.enums.PaymentMethod;
 import com.luxtrox.backend.entity.enums.PlanType;
 import com.luxtrox.backend.entity.enums.PurchaseStatus;
+import com.luxtrox.backend.dto.purchase.AdminPurchaseResponse;
 import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.exception.BusinessRuleException;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
@@ -222,5 +223,56 @@ public class PurchaseService {
                 p.getId(), p.getUser().getId(), p.getCapital(), p.getTargetCashback(),
                 p.getCashbackPaid(), p.getStatus().name().toLowerCase(),
                 p.getCreatedAt(), p.getCreatedAt(), p.getCompletedAt());
+    }
+
+    /**
+     * Para AdminPurchaseController -- el flujo de aprobar/rechazar
+     * compras (distinto de listAllSeminars(), que solo muestra
+     * posiciones Driver YA confirmadas -- esto incluye PENDING, que
+     * es justo lo que el admin necesita revisar). status es un filtro
+     * opcional (NULL = todas).
+     */
+    @Transactional(readOnly = true)
+    public List<AdminPurchaseResponse> listAllPurchases(PurchaseStatus status) {
+        List<Purchase> purchases = status != null
+                ? purchaseRepository.findByStatus(status)
+                : purchaseRepository.findAll();
+        return purchases.stream().map(this::toAdminPurchaseResponse).toList();
+    }
+
+    private AdminPurchaseResponse toAdminPurchaseResponse(Purchase purchase) {
+        User user = purchase.getUser();
+        return new AdminPurchaseResponse(
+                purchase.getId(), user.getId(), user.getFullName(), user.getEmail(),
+                purchase.getPlanType(), purchase.getPackageQuantity(), purchase.getTotalAmount(),
+                purchase.getPaymentMethod(), purchase.getStatus(), purchase.getCreatedAt(),
+                purchase.getConfirmedAt());
+    }
+
+    /**
+     * Rechaza una compra PENDING -- no tiene reintento ni reversa.
+     * Una compra CONFIRMED nunca se puede rechazar (ya genero
+     * efectos reales: InvestmentPosition o ZenithLicense, y
+     * potencialmente una comision de referido) -- si algo asi
+     * necesita revertirse, es un caso de soporte manual, no este
+     * endpoint.
+     */
+    @Transactional
+    public Purchase rejectPurchase(UUID purchaseId) {
+        Purchase purchase = purchaseRepository.findById(purchaseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Compra no encontrada"));
+
+        if (purchase.getStatus() != PurchaseStatus.PENDING) {
+            throw new BusinessRuleException(
+                    "Solo se puede rechazar una compra PENDING (estado actual: " + purchase.getStatus() + ")");
+        }
+
+        purchase.setStatus(PurchaseStatus.REJECTED);
+        purchaseRepository.save(purchase);
+
+        auditService.record(purchase.getUser(), "Purchase", purchase.getId(), "PURCHASE_REJECTED",
+                PurchaseStatus.PENDING, PurchaseStatus.REJECTED);
+
+        return purchase;
     }
 }

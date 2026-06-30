@@ -1,5 +1,7 @@
 package com.luxtrox.backend.service;
 
+import com.luxtrox.backend.dto.purchase.ZenithLicenseResponse;
+import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.ZenithLicense;
 import com.luxtrox.backend.entity.ZenithRenewalPayment;
 import com.luxtrox.backend.entity.enums.ZenithLicenseStatus;
@@ -10,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -74,5 +77,18 @@ public class ZenithService {
             }
         }
         return expiredCount;
+    }
+
+    /**
+     * Para PurchaseController -- "mis licencias Zenith". Sin cadena
+     * LAZY que cuidar aqui: id/status/activatedAt/currentPeriodEnd/
+     * createdAt son todas columnas simples de ZenithLicense, no se
+     * toca user ni purchase (ambos LAZY) en el mapeo.
+     */
+    @Transactional(readOnly = true)
+    public List<ZenithLicenseResponse> listMyLicenses(User user) {
+        return licenseRepository.findByUser(user).stream()
+                .map(ZenithLicenseResponse::from)
+                .toList();
     }
 }

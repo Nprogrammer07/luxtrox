@@ -916,3 +916,43 @@ Tests actualizados para reflejar ambos cambios: `ReferralServiceUnitTest`
 ganan independientemente" se reescribió para probar lo contrario: solo la
 primera compra de una persona genera comisión; se agregó un caso nuevo
 para confirmar que sí se gana de **personas distintas**, sin límite).
+
+## 18. Adenda — endpoint de licencias Zenith (no existía, integración con frontend)
+
+`GET /purchases/zenith-licenses` -- "mis licencias Zenith". No existía ningún
+endpoint que expusiera esto al usuario (ni siquiera a admin) -- el frontend
+(Next.js) nunca tuvo ningún concepto de Zenith en absoluto hasta esta
+integración: solo conocía "seminario" (= `InvestmentPosition`, Driver). La
+página de compra (`/comprar`) solo permitía comprar Driver; se rediseñó para
+ofrecer ambos planes con un paso de selección previo.
+
+- **`ZenithLicenseResponse`**: sin cadena `LAZY` que cuidar -- `id`, `status`,
+  `activatedAt`, `currentPeriodEnd`, `createdAt` son todas columnas simples
+  de `ZenithLicense`, el mapeo no toca `user` ni `purchase` (ambos `LAZY`).
+- **`status` en MAYÚSCULAS** (`ACTIVE`/`EXPIRED`), mismo criterio que el
+  resto de los endpoints de este backend -- la traducción a minúsculas pasa
+  por la capa de servicio del frontend.
+
+## 19. Adenda — aprobar/rechazar compras (no existía endpoint de rechazo ni listado de pendientes)
+
+Al integrar el panel de admin para revisar compras (`/admin/pagos` en el
+frontend, antes una vista de solo lectura con datos derivados/falsos), se
+encontraron dos huecos reales:
+
+- **No existía ningún endpoint para rechazar una compra.** `PurchaseStatus`
+  ya tenía el valor `REJECTED` definido en el enum desde el inicio, pero
+  ningún método de servicio ni endpoint lo disparaba — solo existía
+  `confirmPurchase()`. Se agregó `PurchaseService.rejectPurchase()` +
+  `POST /admin/purchases/{id}/reject`. Solo aplica a compras `PENDING` — una
+  compra ya `CONFIRMED` nunca se puede rechazar (ya generó efectos reales:
+  `InvestmentPosition`/`ZenithLicense`, y potencialmente una comisión de
+  referido — revertir eso es un caso de soporte manual, no este endpoint).
+- **`GET /admin/purchases` no podía mostrar compras pendientes.** Ese
+  endpoint (ya existente, §11/§14) deriva su listado de `InvestmentPosition`
+  — que **no existe** hasta que la compra se confirma. Por construcción,
+  nunca podía mostrarle al admin lo que más necesita ver: las solicitudes
+  pendientes de revisión. Se agregó `GET /admin/purchases/requests`
+  (`AdminPurchaseResponse`, deriva directo de `Purchase`, cualquier status)
+  como endpoint separado, sin modificar el comportamiento de
+  `GET /admin/purchases` (que sigue representando "seminarios confirmados",
+  usado por otras pantallas del frontend).

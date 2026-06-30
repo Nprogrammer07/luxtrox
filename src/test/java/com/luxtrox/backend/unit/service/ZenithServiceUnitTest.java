@@ -157,4 +157,30 @@ class ZenithServiceUnitTest {
         assertThat(expiredCount).isEqualTo(0);
         verify(licenseRepository, never()).save(any());
     }
+
+    // ---------- listMyLicenses() ----------
+
+    @Test
+    void listMyLicenses_mapsEachFieldCorrectly() {
+        ZenithLicense lic = license(OffsetDateTime.now().plusYears(1), ZenithLicenseStatus.ACTIVE);
+        when(licenseRepository.findByUser(user)).thenReturn(List.of(lic));
+
+        var result = service.listMyLicenses(user);
+
+        assertThat(result).hasSize(1);
+        var dto = result.get(0);
+        assertThat(dto.id()).isEqualTo(lic.getId());
+        assertThat(dto.status()).isEqualTo("ACTIVE");
+        assertThat(dto.activatedAt()).isEqualTo(lic.getActivatedAt());
+        assertThat(dto.currentPeriodEnd()).isEqualTo(lic.getCurrentPeriodEnd());
+    }
+
+    @Test
+    void listMyLicenses_userWithNoLicenses_returnsEmptyList() {
+        when(licenseRepository.findByUser(user)).thenReturn(List.of());
+
+        var result = service.listMyLicenses(user);
+
+        assertThat(result).isEmpty();
+    }
 }
