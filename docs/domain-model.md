@@ -956,3 +956,19 @@ encontraron dos huecos reales:
   como endpoint separado, sin modificar el comportamiento de
   `GET /admin/purchases` (que sigue representando "seminarios confirmados",
   usado por otras pantallas del frontend).
+
+## 20. Adenda — comisiones de referido sin restricciones de plan (version final)
+
+Todas las versiones anteriores (Fases 6, 8 y §17) tenían algún tipo de requisito de plan para
+ganar comisiones. La versión final elimina todas esas restricciones:
+
+- **Sin plan requerido.** El referente recibe comisión por cada compra confirmada del referido,
+  sin importar si el referente ha comprado algún plan (Driver o Zenith).
+- **Por compra (repetible).** Cada compra confirmada del referido genera su propia comisión,
+  sin límite de evaluaciones por persona. El Referral se marca `RESOLVED` en la primera compra
+  (para que el admin distinga "todavía no compró" de "ya hay al menos una comisión pagada"),
+  pero `RESOLVED` ya no bloquea evaluaciones futuras.
+- **Siempre directo al balance.** `REFERRAL_BONUS_DIRECT` a `available_balance` del referente,
+  sin involucrar posiciones ni licencias. Driver = 9%, Zenith = 22%.
+- `InvestmentPositionRepository` y `ZenithLicenseRepository` eliminados de `ReferralService`
+  (ya no se usan para nada en la evaluación de comisiones).

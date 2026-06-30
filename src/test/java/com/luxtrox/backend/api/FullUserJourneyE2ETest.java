@@ -2,7 +2,6 @@ package com.luxtrox.backend.api;
 
 import com.luxtrox.backend.entity.Role;
 import com.luxtrox.backend.entity.User;
-import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.RoleRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import io.restassured.http.ContentType;
@@ -35,8 +34,6 @@ class FullUserJourneyE2ETest extends AbstractApiTest {
     private UserRepository userRepository;
     @Autowired
     private RoleRepository roleRepository;
-    @Autowired
-    private InvestmentPositionRepository positionRepository;
 
     private String register(String email, String referralCode) {
         String body = referralCode == null
@@ -112,15 +109,9 @@ class FullUserJourneyE2ETest extends AbstractApiTest {
         String referredPurchaseId = createDriverPurchase(referredToken);
         confirmPurchase(adminToken, referredPurchaseId);
 
-        // Comision: 9% de 1099 = 98.91, aplicada como avance a la posicion ACTIVA del referente.
+        // Comision: 9% de 1099 = 98.91, acreditada DIRECTO al balance del
+        // referente (sin restricciones de plan -- ya no se avanza posicion).
         assertThat(balanceOf(referrerEmail)).isEqualByComparingTo("98.91");
-
-        var referrerPosition = positionRepository.findByUserAndStatus(
-                userRepository.findByEmail(referrerEmail).orElseThrow(),
-                com.luxtrox.backend.entity.enums.PositionStatus.ACTIVE
-        ).get(0);
-        assertThat(referrerPosition.getCashbackPaid()).isEqualByComparingTo("98.91");
-        assertThat(referrerPosition.getCashbackRemaining()).isEqualByComparingTo("3198.09"); // 3297 - 98.91
 
         // ---------- Fase C: rendimiento mensual, se registra y se distribuye ----------
         int uniqueYear = 2030 + (int) (System.nanoTime() % 5000); // unico por corrida -- no hay rollback entre tests

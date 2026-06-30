@@ -16,29 +16,25 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Unitario puro con Mockito -- version corregida (ver
- * docs/domain-model.md adenda de Fase 8, y la adenda posterior que
- * cambia la regla de "por venta" a "por persona"). La comision de
- * Driver requiere posicion Driver propia activa, la de Zenith
- * requiere licencia Zenith propia ACTIVE, la evaluacion es unica por
- * PERSONA referida (no por venta), y sin reintentos.
+ * Comisiones de referido -- VERSION SIMPLIFICADA.
+ * Sin restricciones de plan: cualquier persona con codigo de referido
+ * recibe comision por CADA compra confirmada del referido,
+ * independientemente del plan y sin haber comprado ningun plan propio.
  */
 @ExtendWith(MockitoExtension.class)
 class ReferralServiceUnitTest {
 
     @Mock private ReferralRepository referralRepository;
     @Mock private UserRepository userRepository;
-    @Mock private InvestmentPositionRepository positionRepository;
-    @Mock private ZenithLicenseRepository zenithLicenseRepository;
     @Mock private CashbackTransactionRepository cashbackTransactionRepository;
     @Mock private AuditService auditService;
     @Mock private NotificationEmailService notificationEmailService;
@@ -52,9 +48,8 @@ class ReferralServiceUnitTest {
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        service = new ReferralService(referralRepository, userRepository, positionRepository,
-                zenithLicenseRepository, cashbackTransactionRepository, auditService, notificationEmailService,
-                meterRegistry);
+        service = new ReferralService(referralRepository, userRepository,
+                cashbackTransactionRepository, auditService, notificationEmailService, meterRegistry);
 
         role = new Role("USER", "Usuario estandar");
         referrer = new User("Referente", "referente@example.com", "+1", "hash", role, "REFA0001");
@@ -81,21 +76,11 @@ class ReferralServiceUnitTest {
         return purchase;
     }
 
-    private InvestmentPosition activePosition(User owner, BigDecimal remaining) {
-        Purchase purchase = confirmedPurchase(owner, PlanType.DRIVER, new BigDecimal("1099.00"));
-        InvestmentPosition position = new InvestmentPosition(owner, purchase, new BigDecimal("1099.00"),
-                new BigDecimal("3297.00"));
-        position.setCashbackRemaining(remaining);
-        position.setCashbackPaid(position.getTargetCashback().subtract(remaining));
-        setId(position, UUID.randomUUID());
-        return position;
-    }
-
     private Referral newReferral() {
         return new Referral(referrer, referred, "REFA0001");
     }
 
-    // ---------- calculateCommission() (sin cambios respecto al diseno original) ----------
+    // ---------- calculateCommission() ----------
 
     @Test
     void calculateCommission_driver_isNinePercent() {
@@ -113,35 +98,35 @@ class ReferralServiceUnitTest {
 
     @Test
     void buyerHasNoReferrer_doesNothingAtAll() {
-        referred.setReferredBy(null); // sobreescribe el setUp -- este caso especifico no tiene referente
+        referred.setReferredBy(null);
         Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
+        // El repositorio es ahora la fuente de verdad -- se consulta siempre.
+        // Si no hay fila de Referral, devolvemos empty y no se hace nada mas.
+        when(referralRepository.findByReferred(referred)).thenReturn(java.util.Optional.empty());
 
         service.onReferredPurchaseConfirmed(purchase);
 
-        verifyNoInteractions(referralRepository, positionRepository, zenithLicenseRepository,
-                cashbackTransactionRepository, userRepository, notificationEmailService, auditService);
+        verify(referralRepository).findByReferred(referred); // SI se consulto
+        verifyNoInteractions(cashbackTransactionRepository, userRepository,
+                notificationEmailService, auditService);
+        verify(referralRepository, never()).save(any()); // pero NO se guardo nada
     }
 
-    // ---------- DRIVER: con posicion activa que cubre todo ----------
+    // ---------- Commission directa -- sin restricciones de plan ----------
 
     @Test
-    void driverSale_referrerHasActivePositionThatFullyCovers_paysAsAdvanceOnPosition() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00")); // comision = 98.91
+    void driverPurchase_referrerWithNoPlan_stillReceivesNinePercent() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00")); // 98.91
         Referral referral = newReferral();
-        InvestmentPosition position = activePosition(referrer, new BigDecimal("200.00"));
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(positionRepository.findByUserAndStatusAndCashbackRemainingGreaterThanOrderByCreatedAtDesc(
-                referrer, PositionStatus.ACTIVE, BigDecimal.ZERO)).thenReturn(List.of(position));
 
         service.onReferredPurchaseConfirmed(purchase);
 
-        ArgumentCaptor<InvestmentPosition> positionCaptor = ArgumentCaptor.forClass(InvestmentPosition.class);
-        verify(positionRepository).save(positionCaptor.capture());
-        assertThat(positionCaptor.getValue().getCashbackRemaining()).isEqualByComparingTo("101.09");
-        assertThat(positionCaptor.getValue().getStatus()).isEqualTo(PositionStatus.ACTIVE);
-
-        verify(cashbackTransactionRepository, times(1)).save(any(CashbackTransaction.class));
+        ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
+        verify(cashbackTransactionRepository).save(txCaptor.capture());
+        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("98.91");
+        assertThat(txCaptor.getValue().getType()).isEqualTo(CashbackTransactionType.REFERRAL_BONUS_DIRECT);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
@@ -149,146 +134,85 @@ class ReferralServiceUnitTest {
 
         verify(notificationEmailService).sendReferralBonusReceivedEmail(referrer, new BigDecimal("98.91"));
 
-        ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
-        verify(referralRepository).save(referralCaptor.capture());
-        assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED);
-
-        assertThat(meterRegistry.get("luxtrox.referral.commission.paid").tag("planType", "DRIVER")
-                .counter().count()).isEqualTo(98.91);
+        assertThat(meterRegistry.get("luxtrox.referral.commission.paid")
+                .tag("planType", "DRIVER").counter().count()).isEqualTo(98.91);
     }
 
     @Test
-    void driverSale_commissionExceedsRemainingCashback_excessIsForfeitedNotPaidElsewhere() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00")); // comision = 98.91
-        Referral referral = newReferral();
-        InvestmentPosition position = activePosition(referrer, new BigDecimal("50.00")); // solo le quedan 50
-
-        when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(positionRepository.findByUserAndStatusAndCashbackRemainingGreaterThanOrderByCreatedAtDesc(
-                referrer, PositionStatus.ACTIVE, BigDecimal.ZERO)).thenReturn(List.of(position));
-
-        service.onReferredPurchaseConfirmed(purchase);
-
-        ArgumentCaptor<InvestmentPosition> positionCaptor = ArgumentCaptor.forClass(InvestmentPosition.class);
-        verify(positionRepository).save(positionCaptor.capture());
-        assertThat(positionCaptor.getValue().getCashbackRemaining()).isEqualByComparingTo("0.00");
-        assertThat(positionCaptor.getValue().getStatus()).isEqualTo(PositionStatus.COMPLETED);
-
-        // Solo se paga lo que cupo (50.00) -- UNA transaccion, no dos.
-        ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
-        verify(cashbackTransactionRepository, times(1)).save(txCaptor.capture());
-        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("50.00");
-
-        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
-        verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("50.00"); // NO 98.91
-
-        // El excedente (48.91) debe quedar registrado como perdido, nunca pagado.
-        verify(auditService).recordSystemAction(eq("User"), any(),
-                eq("REFERRAL_COMMISSION_FORFEITED_DRIVER_EXCEEDS_REMAINING"), any(), eq(new BigDecimal("48.91")));
-    }
-
-    // ---------- DRIVER: sin ninguna posicion activa -- se pierde TODO ----------
-
-    @Test
-    void driverSale_referrerHasNoActivePosition_entireCommissionIsForfeited() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
+    void zenithPurchase_referrerWithNoPlan_stillReceivesTwentyTwoPercent() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00")); // 505.78
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(positionRepository.findByUserAndStatusAndCashbackRemainingGreaterThanOrderByCreatedAtDesc(
-                referrer, PositionStatus.ACTIVE, BigDecimal.ZERO)).thenReturn(List.of()); // ninguna activa
 
         service.onReferredPurchaseConfirmed(purchase);
-
-        verifyNoInteractions(cashbackTransactionRepository, userRepository, notificationEmailService);
-        verify(positionRepository, never()).save(any());
-
-        verify(auditService).recordSystemAction(eq("User"), any(),
-                eq("REFERRAL_COMMISSION_FORFEITED_DRIVER_SIN_POSICION_ACTIVA"), any(), eq(new BigDecimal("98.91")));
-
-        ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
-        verify(referralRepository).save(referralCaptor.capture());
-        assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED); // se evaluo, aunque no se pago
-
-        assertThat(meterRegistry.get("luxtrox.referral.commission.forfeited")
-                .tag("reason", "DRIVER_SIN_POSICION_ACTIVA").counter().count()).isEqualTo(98.91);
-    }
-
-    // ---------- ZENITH: con licencia ACTIVE ----------
-
-    @Test
-    void zenithSale_referrerHasActiveLicense_paysFullyAndDirectly() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00")); // comision = 505.78
-        Referral referral = newReferral();
-
-        when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(zenithLicenseRepository.existsByUserAndStatus(referrer, ZenithLicenseStatus.ACTIVE)).thenReturn(true);
-
-        service.onReferredPurchaseConfirmed(purchase);
-
-        verify(positionRepository, never()).save(any()); // Zenith nunca toca una posicion Driver
 
         ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
-        verify(cashbackTransactionRepository, times(1)).save(txCaptor.capture());
+        verify(cashbackTransactionRepository).save(txCaptor.capture());
         assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("505.78");
         assertThat(txCaptor.getValue().getType()).isEqualTo(CashbackTransactionType.REFERRAL_BONUS_DIRECT);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("505.78");
+
+        assertThat(meterRegistry.get("luxtrox.referral.commission.paid")
+                .tag("planType", "ZENITH").counter().count()).isEqualTo(505.78);
     }
 
-    // ---------- ZENITH: SIN licencia activa (nunca tuvo, o la tiene EXPIRED) -- se pierde TODO ----------
+    // ---------- Por compra (repetible) -- RESOLVED ya no bloquea ----------
 
     @Test
-    void zenithSale_referrerHasNoActiveLicense_entireCommissionIsForfeited() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
+    void firstPurchase_referralMovesToResolved() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
         Referral referral = newReferral();
+        assertThat(referral.getStatus()).isEqualTo(ReferralStatus.PENDING_PURCHASE);
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(zenithLicenseRepository.existsByUserAndStatus(referrer, ZenithLicenseStatus.ACTIVE)).thenReturn(false);
 
         service.onReferredPurchaseConfirmed(purchase);
 
-        verifyNoInteractions(cashbackTransactionRepository, userRepository, notificationEmailService);
-        verify(auditService).recordSystemAction(eq("User"), any(),
-                eq("REFERRAL_COMMISSION_FORFEITED_ZENITH_SIN_LICENCIA_ACTIVA"), any(), eq(new BigDecimal("505.78")));
+        ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
+        verify(referralRepository).save(referralCaptor.capture());
+        assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED);
     }
 
-    // ---------- Una sola evaluacion por PERSONA referida, no por venta ----------
-
     @Test
-    void secondPurchaseFromSameReferredPerson_referralAlreadyResolved_doesNothingAtAll() {
-        Purchase secondPurchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
+    void secondPurchaseFromSameReferredPerson_referralAlreadyResolved_stillPaysCommission() {
+        // ANTES: RESOLVED bloqueaba nuevas evaluaciones (una por persona).
+        // AHORA: cada compra genera su propia comision, sin limite.
+        Purchase secondPurchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
         Referral alreadyResolved = newReferral();
-        alreadyResolved.setStatus(ReferralStatus.RESOLVED); // la PRIMERA compra de esta persona ya se evaluo
+        alreadyResolved.setStatus(ReferralStatus.RESOLVED);
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(alreadyResolved));
 
         service.onReferredPurchaseConfirmed(secondPurchase);
 
-        // Nada se evalua de nuevo -- ni pago, ni perdida registrada, ni se vuelve a guardar el Referral.
-        verifyNoInteractions(zenithLicenseRepository, positionRepository, cashbackTransactionRepository,
-                userRepository, notificationEmailService, auditService);
-        verify(referralRepository, never()).save(any());
+        // La comision SI se paga aunque el Referral ya estuviera RESOLVED.
+        verify(cashbackTransactionRepository).save(any(CashbackTransaction.class));
+        verify(userRepository).save(any(User.class));
+        // El Referral YA estaba RESOLVED, no cambia de nuevo.
+        ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
+        verify(referralRepository).save(referralCaptor.capture());
+        assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED);
     }
 
-    // ---------- Fallo de email no tumba un pago ya resuelto ----------
+    // ---------- Fallo de email no tumba el pago ----------
 
     @Test
     void emailFailure_stillCompletesThePaymentAndAudits() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
+        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
-        when(zenithLicenseRepository.existsByUserAndStatus(referrer, ZenithLicenseStatus.ACTIVE)).thenReturn(true);
         doThrow(new RuntimeException("Resend caido")).when(notificationEmailService)
                 .sendReferralBonusReceivedEmail(any(), any());
 
         service.onReferredPurchaseConfirmed(purchase); // no debe propagar la excepcion
 
         verify(userRepository).save(any(User.class)); // el pago SI se completo
-        verify(auditService).recordSystemAction(eq("User"), any(), eq("REFERRAL_EMAIL_NOTIFICATION_FAILED"), any(), any());
+        verify(auditService).recordSystemAction(eq("User"), any(),
+                eq("REFERRAL_EMAIL_NOTIFICATION_FAILED"), any(), any());
     }
 }
