@@ -221,8 +221,10 @@ public class PurchaseService {
     }
 
     private AdminSeminarResponse toSeminarResponse(InvestmentPosition p) {
+        User user = p.getUser();
         return new AdminSeminarResponse(
-                p.getId(), p.getUser().getId(), p.getCapital(), p.getTargetCashback(),
+                p.getId(), user.getId(), user.getFullName(), user.getEmail(),
+                p.getCapital(), p.getTargetCashback(),
                 p.getCashbackPaid(), p.getStatus().name().toLowerCase(),
                 p.getCreatedAt(), p.getCreatedAt(), p.getCompletedAt());
     }

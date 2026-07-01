@@ -25,6 +25,8 @@ import java.util.UUID;
 public record AdminSeminarResponse(
         UUID id,
         UUID userId,
+        String userName,
+        String userEmail,
         BigDecimal capital,
         BigDecimal targetCashback,
         BigDecimal cashbackPaid,

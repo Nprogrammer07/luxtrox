@@ -4,6 +4,7 @@ import com.luxtrox.backend.dto.cashback.CashbackRecordResponse;
 import com.luxtrox.backend.dto.cashback.MonthlyPerformanceResponse;
 import com.luxtrox.backend.dto.cashback.RegisterPerformanceRequest;
 import com.luxtrox.backend.entity.MonthlyPerformance;
+import com.luxtrox.backend.repository.MonthlyPerformanceRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
 import com.luxtrox.backend.service.CashbackDistributionService;
 import com.luxtrox.backend.service.CashbackQueryService;
@@ -14,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -30,17 +32,29 @@ public class AdminCashbackController {
 
     private final CashbackDistributionService distributionService;
     private final CashbackQueryService cashbackQueryService;
+    private final MonthlyPerformanceRepository performanceRepository;
 
     public AdminCashbackController(CashbackDistributionService distributionService,
-                                    CashbackQueryService cashbackQueryService) {
+                                    CashbackQueryService cashbackQueryService,
+                                    MonthlyPerformanceRepository performanceRepository) {
         this.distributionService = distributionService;
         this.cashbackQueryService = cashbackQueryService;
+        this.performanceRepository = performanceRepository;
     }
 
     @GetMapping
     @Operation(summary = "Listar todas las transacciones de cashback (todos los usuarios)")
     public List<CashbackRecordResponse> list() {
         return cashbackQueryService.getAllCashback();
+    }
+
+    @GetMapping("/monthly-performance")
+    @Operation(summary = "Listar todos los rendimientos mensuales registrados, ordenados del mas reciente")
+    public List<MonthlyPerformanceResponse> listPerformances() {
+        return performanceRepository.findAll().stream()
+                .sorted(Comparator.comparingInt((MonthlyPerformance p) -> p.getYear() * 100 + p.getMonth()).reversed())
+                .map(this::toResponse)
+                .toList();
     }
 
     @PostMapping("/monthly-performance")

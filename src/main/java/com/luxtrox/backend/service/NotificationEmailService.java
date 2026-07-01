@@ -63,4 +63,18 @@ public class NotificationEmailService {
 
         resendClient.sendHtml(referrer.getEmail(), "Comision de referido recibida - Luxtrox", html);
     }
+
+    public void sendPasswordResetEmail(User user, String resetUrl) {
+        String html = """
+                <h2>Recuperacion de contrasena</h2>
+                <p>Hola %s, recibimos una solicitud para restablecer la contrasena de tu cuenta.</p>
+                <p>Haz clic en el siguiente enlace para crear una nueva contrasena (valido por 24 horas):</p>
+                <p><a href="%s" style="background:#b8ff20;color:#000;padding:12px 24px;
+                   text-decoration:none;border-radius:8px;font-weight:bold;">
+                   Restablecer contrasena</a></p>
+                <p>Si no solicitaste esto, ignora este correo. Tu contrasena no cambiara.</p>
+                """.formatted(user.getFullName(), resetUrl);
+
+        resendClient.sendHtml(user.getEmail(), "Recuperacion de contrasena - Luxtrox", html);
+    }
 }

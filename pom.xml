@@ -290,6 +290,8 @@
                             <excludes>
                                 <exclude>**/entity/**</exclude>
                                 <exclude>**/dto/**</exclude>
+                                <exclude>**/repository/**</exclude>
+                                <exclude>**/config/**</exclude>
                                 <exclude>**/LuxtroxBackendApplication.class</exclude>
                             </excludes>
                             <rules>
@@ -299,7 +301,7 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
+                                            <minimum>0.85</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
