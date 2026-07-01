@@ -14,6 +14,7 @@ import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.repository.WithdrawalRequestRepository;
 import com.luxtrox.backend.service.AuditService;
 import com.luxtrox.backend.service.NotificationEmailService;
+import com.luxtrox.backend.service.SystemConfigService;
 import com.luxtrox.backend.service.WithdrawalService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -46,6 +47,7 @@ class WithdrawalServiceUnitTest {
     @Mock private UserRepository userRepository;
     @Mock private AuditService auditService;
     @Mock private NotificationEmailService notificationEmailService;
+    @Mock private SystemConfigService systemConfigService;
 
     private WithdrawalService service;
     private MeterRegistry meterRegistry;
@@ -56,7 +58,8 @@ class WithdrawalServiceUnitTest {
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
         service = new WithdrawalService(withdrawalRequestRepository, cryptoDetailRepository,
-                bankDetailRepository, userRepository, auditService, notificationEmailService, meterRegistry);
+                bankDetailRepository, userRepository, auditService, notificationEmailService,
+                meterRegistry, systemConfigService);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
@@ -67,6 +70,7 @@ class WithdrawalServiceUnitTest {
         admin = new User("Admin", "admin@example.com", "+1", "hash", adminRole, "ADMIN001");
         setId(admin, UUID.randomUUID());
 
+        lenient().when(systemConfigService.getMinWithdrawal()).thenReturn(new BigDecimal("50.00"));
         lenient().when(withdrawalRequestRepository.save(any(WithdrawalRequest.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }

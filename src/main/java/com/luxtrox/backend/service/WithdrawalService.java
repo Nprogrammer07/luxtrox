@@ -30,8 +30,6 @@ import java.util.UUID;
 @Service
 public class WithdrawalService {
 
-    private static final BigDecimal MIN_WITHDRAWAL_AMOUNT = new BigDecimal("50.00");
-
     private final WithdrawalRequestRepository withdrawalRequestRepository;
     private final CryptoWithdrawalDetailRepository cryptoDetailRepository;
     private final BankWithdrawalDetailRepository bankDetailRepository;
@@ -39,6 +37,7 @@ public class WithdrawalService {
     private final AuditService auditService;
     private final NotificationEmailService notificationEmailService;
     private final MeterRegistry meterRegistry;
+    private final SystemConfigService systemConfigService;
 
     public WithdrawalService(WithdrawalRequestRepository withdrawalRequestRepository,
                               CryptoWithdrawalDetailRepository cryptoDetailRepository,
@@ -46,7 +45,8 @@ public class WithdrawalService {
                               UserRepository userRepository,
                               AuditService auditService,
                               NotificationEmailService notificationEmailService,
-                              MeterRegistry meterRegistry) {
+                              MeterRegistry meterRegistry,
+                              SystemConfigService systemConfigService) {
         this.withdrawalRequestRepository = withdrawalRequestRepository;
         this.cryptoDetailRepository = cryptoDetailRepository;
         this.bankDetailRepository = bankDetailRepository;
@@ -54,6 +54,7 @@ public class WithdrawalService {
         this.auditService = auditService;
         this.notificationEmailService = notificationEmailService;
         this.meterRegistry = meterRegistry;
+        this.systemConfigService = systemConfigService;
     }
 
     @Transactional
@@ -77,8 +78,9 @@ public class WithdrawalService {
     }
 
     private WithdrawalRequest createBaseRequest(User user, WithdrawalType type, BigDecimal amount) {
-        if (amount == null || amount.compareTo(MIN_WITHDRAWAL_AMOUNT) < 0) {
-            throw new BusinessRuleException("El monto minimo de retiro es $" + MIN_WITHDRAWAL_AMOUNT);
+        BigDecimal minAmount = systemConfigService.getMinWithdrawal();
+        if (amount == null || amount.compareTo(minAmount) < 0) {
+            throw new BusinessRuleException("El monto minimo de retiro es $" + minAmount);
         }
         if (amount.compareTo(user.getAvailableBalance()) > 0) {
             throw new BusinessRuleException("El monto solicitado supera el saldo disponible");

@@ -48,6 +48,7 @@ class PurchaseServiceUnitTest {
     @Mock private NowPaymentsClient nowPaymentsClient;
     @Mock private InvoiceService invoiceService;
     @Mock private NotificationEmailService notificationEmailService;
+    @Mock private SystemConfigService systemConfigService;
 
     private PurchaseService purchaseService;
     private MeterRegistry meterRegistry;
@@ -58,12 +59,18 @@ class PurchaseServiceUnitTest {
         meterRegistry = new SimpleMeterRegistry();
         purchaseService = new PurchaseService(purchaseRepository, userRepository, positionRepository,
                 zenithLicenseRepository, referralService, auditService, nowPaymentsClient,
-                invoiceService, notificationEmailService, meterRegistry);
+                invoiceService, notificationEmailService, meterRegistry, systemConfigService);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
         setId(user, UUID.randomUUID());
         user.setTotalPackagesPurchased(0);
+
+        // Defaults que replican los valores reales de PlanPricing / V23
+        lenient().when(systemConfigService.getDriverPrice()).thenReturn(PlanPricing.DRIVER_PACKAGE_PRICE);
+        lenient().when(systemConfigService.getMaxDriverPositions()).thenReturn(PlanPricing.MAX_DRIVER_PACKAGES);
+        lenient().when(systemConfigService.getCashbackRate()).thenReturn(PlanPricing.CASHBACK_MULTIPLIER);
+        lenient().when(systemConfigService.getMinWithdrawal()).thenReturn(new java.math.BigDecimal("50.00"));
 
         lenient().when(purchaseRepository.save(any(Purchase.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));

@@ -48,6 +48,7 @@ public class PurchaseService {
     private final InvoiceService invoiceService;
     private final NotificationEmailService notificationEmailService;
     private final MeterRegistry meterRegistry;
+    private final SystemConfigService systemConfigService;
 
     public PurchaseService(PurchaseRepository purchaseRepository,
                             UserRepository userRepository,
@@ -58,7 +59,8 @@ public class PurchaseService {
                             NowPaymentsClient nowPaymentsClient,
                             InvoiceService invoiceService,
                             NotificationEmailService notificationEmailService,
-                            MeterRegistry meterRegistry) {
+                            MeterRegistry meterRegistry,
+                            SystemConfigService systemConfigService) {
         this.purchaseRepository = purchaseRepository;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
@@ -69,25 +71,25 @@ public class PurchaseService {
         this.invoiceService = invoiceService;
         this.notificationEmailService = notificationEmailService;
         this.meterRegistry = meterRegistry;
+        this.systemConfigService = systemConfigService;
     }
 
     @Transactional
     public Purchase createDriverPurchase(User user, Integer packageQuantity, PaymentMethod paymentMethod) {
-        if (packageQuantity == null || packageQuantity < 1 || packageQuantity > PlanPricing.MAX_DRIVER_PACKAGES) {
+        int maxPositions = systemConfigService.getMaxDriverPositions();
+        if (packageQuantity == null || packageQuantity < 1 || packageQuantity > maxPositions) {
             throw new BusinessRuleException(
-                    "La cantidad de paquetes debe estar entre 1 y " + PlanPricing.MAX_DRIVER_PACKAGES);
+                    "La cantidad de paquetes debe estar entre 1 y " + maxPositions);
         }
-        // Tope ACUMULADO por usuario, no por compra individual (ver
-        // docs/domain-model.md supuesto #1, confirmado por el cliente).
         int totalAfter = user.getTotalPackagesPurchased() + packageQuantity;
-        if (totalAfter > PlanPricing.MAX_DRIVER_PACKAGES) {
+        if (totalAfter > maxPositions) {
             throw new BusinessRuleException(
-                    "Esta compra superaria el tope de " + PlanPricing.MAX_DRIVER_PACKAGES
+                    "Esta compra superaria el tope de " + maxPositions
                             + " paquetes acumulados (ya tiene " + user.getTotalPackagesPurchased() + ")");
         }
 
-        BigDecimal totalAmount = PlanPricing.DRIVER_PACKAGE_PRICE
-                .multiply(BigDecimal.valueOf(packageQuantity));
+        BigDecimal unitPrice = systemConfigService.getDriverPrice();
+        BigDecimal totalAmount = unitPrice.multiply(BigDecimal.valueOf(packageQuantity));
 
         Purchase purchase = new Purchase(user, PlanType.DRIVER, packageQuantity, totalAmount, paymentMethod);
         return purchaseRepository.save(purchase);
@@ -145,7 +147,7 @@ public class PurchaseService {
         User user = purchase.getUser();
 
         if (purchase.getPlanType() == PlanType.DRIVER) {
-            BigDecimal targetCashback = purchase.getTotalAmount().multiply(PlanPricing.CASHBACK_MULTIPLIER);
+            BigDecimal targetCashback = purchase.getTotalAmount().multiply(systemConfigService.getCashbackRate());
             InvestmentPosition position = new InvestmentPosition(user, purchase, purchase.getTotalAmount(), targetCashback);
             positionRepository.save(position);
             purchase.setPosition(position);
