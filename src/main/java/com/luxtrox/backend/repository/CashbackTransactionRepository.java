@@ -87,21 +87,24 @@ public interface CashbackTransactionRepository extends JpaRepository<CashbackTra
     BigDecimal sumAmountBySourceReferral(@Param("referral") Referral referral);
 
     /**
-     * Para ReferralController.summary()/.bonuses() -- "cuanto he
-     * ganado en total por referidos". Cubre AMBOS casos de como un
-     * bono de referido puede quedar registrado: REFERRAL_BONUS_DIRECT
-     * tiene c.user propio (Zenith, pago directo a balance);
-     * REFERRAL_BONUS NO tiene c.user (Driver, se aplica como avance a
-     * una posicion -- su usuario solo se conoce via c.position.user).
-     * El OR cubre los dos sin necesitar dos consultas separadas.
+     * Para ReferralController.summary() -- "cuanto he ganado en total
+     * por referidos". USA LEFT JOIN explicito en c.position para no
+     * excluir REFERRAL_BONUS_DIRECT (que no tiene posicion asociada).
+     * Sin LEFT JOIN, el JOIN implicito de JPQL en c.position.user
+     * descarta todas las filas donde position IS NULL, que son
+     * exactamente los REFERRAL_BONUS_DIRECT del nuevo esquema
+     * simplificado (sin restriccion de plan).
      */
     @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c " +
+            "LEFT JOIN c.position pos " +
             "WHERE c.type IN ('REFERRAL_BONUS', 'REFERRAL_BONUS_DIRECT') " +
-            "AND (c.user = :user OR c.position.user = :user)")
+            "AND (c.user = :user OR pos.user = :user)")
     BigDecimal sumReferralBonusForUser(@Param("user") User user);
 
+    /** Mismo fix LEFT JOIN -- para el historial de bonos. */
     @Query("SELECT c FROM CashbackTransaction c " +
+            "LEFT JOIN c.position pos " +
             "WHERE c.type IN ('REFERRAL_BONUS', 'REFERRAL_BONUS_DIRECT') " +
-            "AND (c.user = :user OR c.position.user = :user) ORDER BY c.createdAt DESC")
+            "AND (c.user = :user OR pos.user = :user) ORDER BY c.createdAt DESC")
     List<CashbackTransaction> findReferralBonusesForUser(@Param("user") User user);
 }

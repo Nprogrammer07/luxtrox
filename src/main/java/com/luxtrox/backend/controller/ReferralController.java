@@ -56,10 +56,14 @@ public class ReferralController {
     @Operation(summary = "Resumen de mi actividad de referidos (totales, activos, comision ganada)")
     public ReferralSummaryResponse summary(@AuthenticationPrincipal CustomUserPrincipal principal) {
         User user = principal.getUser();
+        long total = referralRepository.countByReferrer(user);
         return new ReferralSummaryResponse(
                 user.getReferralCode(),
-                referralRepository.countByReferrer(user),
-                referralRepository.countByReferrerAndStatus(user, ReferralStatus.PENDING_PURCHASE),
+                total,
+                // activeReferrals ahora = total de partners (PENDING_PURCHASE + RESOLVED)
+                // -- con las nuevas reglas las comisiones son por compra (repetibles),
+                // todos los referidos son "activos" sin importar su estado de Referral.
+                total,
                 transactionRepository.sumReferralBonusForUser(user),
                 BigDecimal.ZERO
         );
