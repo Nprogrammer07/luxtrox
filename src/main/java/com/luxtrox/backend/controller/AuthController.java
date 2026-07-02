@@ -10,6 +10,7 @@ import com.luxtrox.backend.exception.BusinessRuleException;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
 import com.luxtrox.backend.repository.PasswordResetTokenRepository;
 import com.luxtrox.backend.repository.UserRepository;
+import com.luxtrox.backend.security.CustomUserPrincipal;
 import com.luxtrox.backend.service.AuthService;
 import com.luxtrox.backend.service.NotificationEmailService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +22,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -103,6 +105,28 @@ public class AuthController {
                 // El correo fallo pero no lo revelamos al cliente
             }
         }
+        return ResponseEntity.noContent().build();
+    }
+
+    record ChangePasswordRequest(
+            @NotBlank String currentPassword,
+            @NotBlank @Size(min = 8, message = "La nueva contrasena debe tener al menos 8 caracteres")
+            String newPassword
+    ) {}
+
+    @PostMapping("/change-password")
+    @Transactional
+    @Operation(summary = "Cambiar contrasena estando autenticado (requiere la contrasena actual)")
+    public ResponseEntity<Void> changePassword(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @Valid @RequestBody ChangePasswordRequest request) {
+
+        User user = principal.getUser();
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new BusinessRuleException("La contraseña actual no es correcta");
+        }
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
         return ResponseEntity.noContent().build();
     }
 

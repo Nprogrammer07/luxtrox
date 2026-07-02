@@ -96,6 +96,7 @@ public class CashbackDistributionService {
         int month = today.getMonthValue();
         int year  = today.getYear();
         int day   = today.getDayOfMonth();
+        int lastDayOfMonth = today.lengthOfMonth();
 
         Optional<MonthlyPerformance> perfOpt = performanceRepository.findByMonthAndYear(month, year);
         if (perfOpt.isEmpty()) {
@@ -106,15 +107,26 @@ public class CashbackDistributionService {
         BigDecimal rate = performance.getPercentage()
                 .divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
 
-        List<InvestmentPosition> positions =
-                positionRepository.findActiveByDayOfMonth(day);
+        List<InvestmentPosition> positions = new java.util.ArrayList<>(
+                positionRepository.findActiveByDayOfMonth(day));
+
+        // Edge case: si hoy es el ultimo dia del mes, incluir posiciones cuyo
+        // dia de nacimiento no existe en este mes (ej. nacidas el 29/30/31 en febrero).
+        // Sin esto, una posicion creada el 31 de enero no cobra en febrero.
+        if (day == lastDayOfMonth && day < 31) {
+            for (int extraDay = day + 1; extraDay <= 31; extraDay++) {
+                positions.addAll(positionRepository.findActiveByDayOfMonth(extraDay));
+            }
+            log.info("[Scheduler] Ultimo dia del mes -- incluyendo dias {}-31 del aniversario", day + 1);
+        }
 
         log.info("[Scheduler] {} posiciones con aniversario hoy (dia {}), mes {}/{}",
                 positions.size(), day, month, year);
 
         for (InvestmentPosition position : positions) {
             if (cashbackTransactionRepository
-                    .existsByPositionAndSourcePerformance(position, performance)) {
+                    .existsByPositionAndSourcePerformanceAndType(
+                            position, performance, CashbackTransactionType.MONTHLY_PERFORMANCE)) {
                 log.debug("[Scheduler] Posicion {} ya pagada -- skip", position.getId());
                 continue;
             }
