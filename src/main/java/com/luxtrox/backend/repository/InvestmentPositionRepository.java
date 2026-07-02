@@ -26,6 +26,11 @@ public interface InvestmentPositionRepository extends JpaRepository<InvestmentPo
      */
     List<InvestmentPosition> findByStatusOrderByCreatedAtAsc(PositionStatus status);
 
+    /** Para el scheduler de aniversarios: posiciones activas cuyo dia de inicio = hoy */
+    @Query("SELECT p FROM InvestmentPosition p WHERE p.status = 'ACTIVE' " +
+            "AND EXTRACT(DAY FROM p.createdAt) = :day")
+    List<InvestmentPosition> findActiveByDayOfMonth(@Param("day") int day);
+
     List<InvestmentPosition> findByUserAndStatus(User user, PositionStatus status);
 
     /**

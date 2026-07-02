@@ -117,13 +117,19 @@ class CashbackDistributionServiceUnitTest {
         setId(performance, id);
         when(performanceRepository.findById(id)).thenReturn(Optional.of(performance));
 
+        // Con la nueva idempotencia por posicion (no por appliedAt global), el servicio
+        // SI llama a positionRepository para obtener la lista, pero con la lista vacia
+        // ninguna posicion es pagada. Esto refleja el comportamiento real en produccion:
+        // el servicio comprueba posicion a posicion en vez de abortar globalmente.
+        when(positionRepository.findByStatusOrderByCreatedAtAsc(PositionStatus.ACTIVE))
+                .thenReturn(List.of());
+
         service.distribute(id);
 
-        verifyNoInteractions(positionRepository, cashbackTransactionRepository, userRepository);
-        verify(performanceRepository, never()).save(any());
-
-        // El early-return de idempotencia no debe contar como una distribucion real.
-        assertThat(meterRegistry.find("luxtrox.cashback.distribution").timer()).isNull();
+        verify(positionRepository).findByStatusOrderByCreatedAtAsc(PositionStatus.ACTIVE);
+        verifyNoInteractions(cashbackTransactionRepository, userRepository);
+        // distribute() siempre guarda appliedAt aunque no haya posiciones
+        verify(performanceRepository).save(any());
     }
 
     @Test

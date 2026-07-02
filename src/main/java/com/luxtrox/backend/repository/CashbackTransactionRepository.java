@@ -2,6 +2,7 @@ package com.luxtrox.backend.repository;
 
 import com.luxtrox.backend.entity.CashbackTransaction;
 import com.luxtrox.backend.entity.InvestmentPosition;
+import com.luxtrox.backend.entity.MonthlyPerformance;
 import com.luxtrox.backend.entity.Referral;
 import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.CashbackTransactionType;
@@ -43,6 +44,11 @@ public interface CashbackTransactionRepository extends JpaRepository<CashbackTra
     List<CashbackTransaction> findByPositionUserAndTypeIn(@Param("user") User user,
                                                             @Param("types") List<CashbackTransactionType> types);
 
+    /** Para CashbackDistributionService.distributeForAnniversaries() */
+    @Query("SELECT p FROM InvestmentPosition p WHERE p.status = 'ACTIVE' " +
+            "AND EXTRACT(DAY FROM p.createdAt) = :day")
+    List<InvestmentPosition> findActiveByDayOfMonth(@Param("day") int day);
+
     @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c " +
             "WHERE c.position.user = :user AND c.type IN :types")
     BigDecimal sumByPositionUserAndTypeIn(@Param("user") User user,
@@ -65,11 +71,26 @@ public interface CashbackTransactionRepository extends JpaRepository<CashbackTra
     List<Object[]> sumByPositionUserAndTypeInGroupedByMonth(@Param("user") User user,
                                                               @Param("types") List<CashbackTransactionType> types);
 
-    /** Para CashbackQueryService.getSummary() -- total de TODOS los tipos (rendimiento + comisiones + creditos manuales). */
+    /** Para CashbackDistributionService.distributeForAnniversaries() */
     @Query("SELECT COALESCE(SUM(c.amount), 0) FROM CashbackTransaction c " +
             "LEFT JOIN c.position pos " +
             "WHERE c.user = :user OR pos.user = :user")
     BigDecimal sumAllCashbackForUser(@Param("user") User user);
+
+    /** Idempotencia por posicion: ¿ya recibio esta posicion su pago de este MonthlyPerformance? */
+    boolean existsByPositionAndSourcePerformance(InvestmentPosition position, MonthlyPerformance sourcePerformance);
+
+    /**
+     * Idempotencia PRIMARIA: solo cuenta MONTHLY_PERFORMANCE (no REASSIGNED).
+     * Una posicion puede tener una transaccion REASSIGNED (recibio excedente de
+     * otra posicion) y aun asi no haber recibido su propio pago nominal.
+     * distribute() usa este metodo -- no el amplio -- para no saltar el pago
+     * propio de posiciones que solo tienen transacciones de cascada.
+     */
+    boolean existsByPositionAndSourcePerformanceAndType(
+            InvestmentPosition position,
+            MonthlyPerformance sourcePerformance,
+            CashbackTransactionType type);
 
     /** Para CashbackQueryService.getHistory() -- historial completo de todos los tipos de un usuario. */
     @Query("SELECT c FROM CashbackTransaction c " +

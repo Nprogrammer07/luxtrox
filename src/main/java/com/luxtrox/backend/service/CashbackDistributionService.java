@@ -14,11 +14,15 @@ import com.luxtrox.backend.repository.MonthlyPerformanceRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +43,8 @@ import java.util.UUID;
  */
 @Service
 public class CashbackDistributionService {
+
+    private static final Logger log = LoggerFactory.getLogger(CashbackDistributionService.class);
 
     private final MonthlyPerformanceRepository performanceRepository;
     private final InvestmentPositionRepository positionRepository;
@@ -72,41 +78,97 @@ public class CashbackDistributionService {
     }
 
     /**
-     * Aplica un MonthlyPerformance ya registrado a todas las
-     * posiciones ACTIVE de la plataforma. Idempotente: si ya se
-     * aplico (appliedAt != null), no hace nada -- evita pagar doble
-     * si el job se corre dos veces por error.
+     * Scheduler diario a medianoche -- paga el rendimiento del mes
+     * a las posiciones que HOY cumplen su aniversario mensual.
+     *
+     * Ejemplo: si un usuario compro el 15 de enero, su "cumpleaños"
+     * es el dia 15 de cada mes. Si el admin registro 9% para julio,
+     * este job pagara ese 9% a esa posicion el 15 de julio.
+     *
+     * Idempotente a nivel de posicion: si ya existe una transaccion
+     * MONTHLY_PERFORMANCE para (posicion, performance), se salta.
+     * Si no hay performance registrada para el mes actual, no hace nada.
+     */
+    @Scheduled(cron = "0 0 0 * * *")
+    @Transactional
+    public void distributeAnniversariesForToday() {
+        LocalDate today = LocalDate.now();
+        int month = today.getMonthValue();
+        int year  = today.getYear();
+        int day   = today.getDayOfMonth();
+
+        Optional<MonthlyPerformance> perfOpt = performanceRepository.findByMonthAndYear(month, year);
+        if (perfOpt.isEmpty()) {
+            log.info("[Scheduler] No hay rendimiento registrado para {}/{} -- skip", month, year);
+            return;
+        }
+        MonthlyPerformance performance = perfOpt.get();
+        BigDecimal rate = performance.getPercentage()
+                .divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
+
+        List<InvestmentPosition> positions =
+                positionRepository.findActiveByDayOfMonth(day);
+
+        log.info("[Scheduler] {} posiciones con aniversario hoy (dia {}), mes {}/{}",
+                positions.size(), day, month, year);
+
+        for (InvestmentPosition position : positions) {
+            if (cashbackTransactionRepository
+                    .existsByPositionAndSourcePerformance(position, performance)) {
+                log.debug("[Scheduler] Posicion {} ya pagada -- skip", position.getId());
+                continue;
+            }
+            applyToPosition(position, rate, performance, new HashSet<>());
+        }
+    }
+
+    /**
+     * Distribucion manual -- paga a TODAS las posiciones activas que
+     * aun no recibieron su pago de este MonthlyPerformance.
+     * Util para: pruebas, correcciones y pagar posiciones cuyo dia de
+     * aniversario ya paso sin que el scheduler corriera (ej. si el
+     * backend estuvo caido ese dia).
+     *
+     * Idempotente: si una posicion ya fue pagada por el scheduler o
+     * por una ejecucion anterior de este metodo, se la salta.
      */
     @Transactional
     public void distribute(UUID monthlyPerformanceId) {
         MonthlyPerformance performance = performanceRepository.findById(monthlyPerformanceId)
                 .orElseThrow(() -> new ResourceNotFoundException("MonthlyPerformance no encontrado"));
 
-        if (performance.getAppliedAt() != null) {
-            return; // ya se aplico -- idempotencia
-        }
-
-        // El sample arranca DESPUES del chequeo de idempotencia a
-        // proposito -- un run que no hizo nada (porque ya se habia
-        // aplicado) no deberia contar como una distribucion real para
-        // efectos de esta metrica.
         Timer.Sample sample = Timer.start(meterRegistry);
-
-        BigDecimal rate = performance.getPercentage().divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
+        BigDecimal rate = performance.getPercentage()
+                .divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
 
         List<InvestmentPosition> activePositions =
                 positionRepository.findByStatusOrderByCreatedAtAsc(PositionStatus.ACTIVE);
 
+        int pagadas = 0;
         for (InvestmentPosition position : activePositions) {
+            // Idempotencia SOLO por tipo MONTHLY_PERFORMANCE -- no por REASSIGNED.
+            // Una posicion con transacciones REASSIGNED (excedente recibido de otras)
+            // aun no ha recibido su propio pago nominal y NO debe saltarse.
+            if (cashbackTransactionRepository
+                    .existsByPositionAndSourcePerformanceAndType(
+                            position, performance, CashbackTransactionType.MONTHLY_PERFORMANCE)) {
+                continue;
+            }
             applyToPosition(position, rate, performance, new HashSet<>());
+            pagadas++;
         }
+
+        log.info("[Manual] Distribucion {}/{}: {} posiciones pagadas",
+                performance.getMonth(), performance.getYear(), pagadas);
 
         performance.setAppliedAt(OffsetDateTime.now());
         performanceRepository.save(performance);
 
-        sample.stop(Timer.builder("luxtrox.cashback.distribution")
-                .description("Duracion de una distribucion de rendimiento mensual completa")
-                .register(meterRegistry));
+        if (pagadas > 0) {
+            sample.stop(Timer.builder("luxtrox.cashback.distribution")
+                    .description("Duracion de una distribucion de rendimiento mensual completa")
+                    .register(meterRegistry));
+        }
     }
 
     /**
