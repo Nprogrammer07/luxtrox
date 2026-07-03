@@ -24,17 +24,6 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Crea y confirma compras de los dos planes (ver docs/domain-model.md
- * 7.1). DRIVER genera una InvestmentPosition (participa del motor de
- * cashback); ZENITH genera una ZenithLicense (no participa de cashback
- * en absoluto, solo requiere renovacion anual -- ver ZenithService).
- *
- * Fase 7: las compras CRYPTO generan un invoice en NOWPayments
- * (initiateCryptoPayment); al confirmarse CUALQUIER compra (sin
- * importar el metodo de pago) se genera la factura PDF y se envia el
- * correo de confirmacion.
- */
 @Service
 public class PurchaseService {
 
@@ -49,6 +38,7 @@ public class PurchaseService {
     private final NotificationEmailService notificationEmailService;
     private final MeterRegistry meterRegistry;
     private final SystemConfigService systemConfigService;
+    private final PlusService plusService;
 
     public PurchaseService(PurchaseRepository purchaseRepository,
                             UserRepository userRepository,
@@ -60,7 +50,8 @@ public class PurchaseService {
                             InvoiceService invoiceService,
                             NotificationEmailService notificationEmailService,
                             MeterRegistry meterRegistry,
-                            SystemConfigService systemConfigService) {
+                            SystemConfigService systemConfigService,
+                            PlusService plusService) {
         this.purchaseRepository = purchaseRepository;
         this.userRepository = userRepository;
         this.positionRepository = positionRepository;
@@ -72,6 +63,7 @@ public class PurchaseService {
         this.notificationEmailService = notificationEmailService;
         this.meterRegistry = meterRegistry;
         this.systemConfigService = systemConfigService;
+        this.plusService = plusService;
     }
 
     @Transactional
@@ -97,18 +89,21 @@ public class PurchaseService {
 
     @Transactional
     public Purchase createZenithPurchase(User user, PaymentMethod paymentMethod) {
-        Purchase purchase = new Purchase(user, PlanType.ZENITH, 1, PlanPricing.ZENITH_PRICE, paymentMethod);
+        // $100 de descuento si el usuario tiene Luxtrox Plus activo
+        BigDecimal zenithPrice = PlanPricing.ZENITH_PRICE;
+        if (plusService.hasActiveLicense(user)) {
+            zenithPrice = zenithPrice.subtract(PlanPricing.PLUS_ZENITH_DISCOUNT);
+        }
+        Purchase purchase = new Purchase(user, PlanType.ZENITH, 1, zenithPrice, paymentMethod);
         return purchaseRepository.save(purchase);
     }
 
-    /**
-     * Solo aplica a compras con paymentMethod = CRYPTO. Crea el
-     * invoice en NOWPayments, guarda su id en la compra, y devuelve la
-     * URL a la que el frontend debe redirigir al usuario para pagar.
-     * La confirmacion real llega despues, de forma asincrona, via
-     * NowPaymentsWebhookController -- esta llamada NUNCA confirma la
-     * compra por si misma.
-     */
+    @Transactional
+    public Purchase createPlusPurchase(User user, PaymentMethod paymentMethod) {
+        Purchase purchase = new Purchase(user, PlanType.PLUS, 1, PlanPricing.PLUS_PRICE, paymentMethod);
+        return purchaseRepository.save(purchase);
+    }
+
     @Transactional
     public String initiateCryptoPayment(Purchase purchase) {
         if (purchase.getPaymentMethod() != PaymentMethod.CRYPTO) {
@@ -120,21 +115,13 @@ public class PurchaseService {
         return invoice.invoiceUrl();
     }
 
-    /**
-     * Confirma una compra ya pagada: crea la posicion (DRIVER) o la
-     * licencia (ZENITH), actualiza contadores del usuario, genera la
-     * factura PDF + correo de confirmacion, y dispara la evaluacion de
-     * comisiones de referido en ambas direcciones (el comprador como
-     * referido, y el comprador como referente de otros que estaban
-     * esperando -- ver docs/domain-model.md 7.2).
-     */
     @Transactional
     public Purchase confirmPurchase(UUID purchaseId) {
         Purchase purchase = purchaseRepository.findById(purchaseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Compra no encontrada"));
 
         if (purchase.getStatus() == PurchaseStatus.CONFIRMED) {
-            return purchase; // idempotente -- ya confirmada, no repetir efectos
+            return purchase;
         }
         if (purchase.getStatus() != PurchaseStatus.PENDING) {
             throw new BusinessRuleException(
@@ -154,10 +141,15 @@ public class PurchaseService {
 
             user.setTotalPackagesPurchased(user.getTotalPackagesPurchased() + purchase.getPackageQuantity());
             userRepository.save(user);
-        } else {
+
+        } else if (purchase.getPlanType() == PlanType.ZENITH) {
             OffsetDateTime now = OffsetDateTime.now();
             ZenithLicense license = new ZenithLicense(user, purchase, now, now.plusYears(1));
             zenithLicenseRepository.save(license);
+
+        } else {
+            // PLUS — licencia educativa de 5 años
+            plusService.createLicense(user, purchase);
         }
 
         purchaseRepository.save(purchase);
@@ -173,21 +165,11 @@ public class PurchaseService {
 
         generateInvoiceAndNotify(purchase);
 
-        // El comprador puede ser un REFERIDO de alguien -- evalua y
-        // resuelve esa comision de inmediato (pagada, parcial, o
-        // perdida -- sin reintentos, ver ReferralService).
         referralService.onReferredPurchaseConfirmed(purchase);
 
         return purchase;
     }
 
-    /**
-     * Aislado en su propio metodo para que un fallo de email/PDF
-     * (ej. Resend caido) NUNCA tumbe la confirmacion de la compra en
-     * si -- el dinero/posicion/licencia ya quedaron correctos antes de
-     * llegar aqui. Se atrapa cualquier excepcion y solo se deja
-     * constancia en el log, no se relanza.
-     */
     private void generateInvoiceAndNotify(Purchase purchase) {
         try {
             InvoiceService.InvoiceWithBytes result = invoiceService.generateStoreAndReturnBytes(purchase);
@@ -199,12 +181,6 @@ public class PurchaseService {
         }
     }
 
-    /**
-     * Para AdminPurchaseController -- listado de "seminarios"
-     * (InvestmentPosition) para el admin, sin filtrar por usuario.
-     * Solo Driver genera posiciones; Zenith no aparece aqui (ver
-     * docs/domain-model.md adenda correspondiente).
-     */
     @Transactional(readOnly = true)
     public List<AdminSeminarResponse> listAllSeminars() {
         return positionRepository.findAll().stream()
@@ -212,7 +188,6 @@ public class PurchaseService {
                 .toList();
     }
 
-    /** Para PurchaseController -- "mis seminarios" (mismo mapeo, filtrado a un usuario). */
     @Transactional(readOnly = true)
     public List<AdminSeminarResponse> listMySeminars(User user) {
         return positionRepository.findByUser(user).stream()
@@ -229,13 +204,6 @@ public class PurchaseService {
                 p.getCreatedAt(), p.getCreatedAt(), p.getCompletedAt());
     }
 
-    /**
-     * Para AdminPurchaseController -- el flujo de aprobar/rechazar
-     * compras (distinto de listAllSeminars(), que solo muestra
-     * posiciones Driver YA confirmadas -- esto incluye PENDING, que
-     * es justo lo que el admin necesita revisar). status es un filtro
-     * opcional (NULL = todas).
-     */
     @Transactional(readOnly = true)
     public List<AdminPurchaseResponse> listAllPurchases(PurchaseStatus status) {
         List<Purchase> purchases = status != null
@@ -253,14 +221,6 @@ public class PurchaseService {
                 purchase.getConfirmedAt());
     }
 
-    /**
-     * Rechaza una compra PENDING -- no tiene reintento ni reversa.
-     * Una compra CONFIRMED nunca se puede rechazar (ya genero
-     * efectos reales: InvestmentPosition o ZenithLicense, y
-     * potencialmente una comision de referido) -- si algo asi
-     * necesita revertirse, es un caso de soporte manual, no este
-     * endpoint.
-     */
     @Transactional
     public Purchase rejectPurchase(UUID purchaseId) {
         Purchase purchase = purchaseRepository.findById(purchaseId)

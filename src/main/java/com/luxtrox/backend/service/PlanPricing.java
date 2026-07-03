@@ -3,25 +3,27 @@ package com.luxtrox.backend.service;
 import java.math.BigDecimal;
 
 /**
- * Constantes de negocio centralizadas -- ver docs/domain-model.md
- * principios y adenda §7. Si el negocio vuelve a cambiar un precio o
- * porcentaje, este es el unico lugar que hay que tocar.
+ * Constantes de precio y tasas de los planes de la plataforma.
+ * Los valores de DRIVER, MAX_DRIVER y CASHBACK_MULTIPLIER son fallback —
+ * los valores reales en producción vienen de SystemConfigService (BD).
  */
-public final class PlanPricing {
+public class PlanPricing {
 
-    private PlanPricing() {
-    }
+    // Plan Driver
+    public static final BigDecimal DRIVER_PACKAGE_PRICE  = new BigDecimal("1099.00");
+    public static final int        MAX_DRIVER_PACKAGES   = 30;
+    public static final BigDecimal CASHBACK_MULTIPLIER   = new BigDecimal("3.00");
+    public static final BigDecimal DRIVER_REFERRAL_RATE  = new BigDecimal("0.09");
 
-    public static final BigDecimal DRIVER_PACKAGE_PRICE = new BigDecimal("1099.00");
-    public static final int MAX_DRIVER_PACKAGES = 30;
-    public static final BigDecimal CASHBACK_MULTIPLIER = new BigDecimal("3.0");
+    // Plan Zenith
+    public static final BigDecimal ZENITH_PRICE          = new BigDecimal("2299.00");
+    public static final BigDecimal ZENITH_RENEWAL_PRICE  = new BigDecimal("250.00");
+    public static final BigDecimal ZENITH_REFERRAL_RATE  = new BigDecimal("0.22");
 
-    public static final BigDecimal ZENITH_PRICE = new BigDecimal("2299.00");
-    public static final BigDecimal ZENITH_RENEWAL_PRICE = new BigDecimal("250.00");
+    // Plan Plus
+    public static final BigDecimal PLUS_PRICE            = new BigDecimal("200.00");
+    public static final BigDecimal PLUS_REFERRAL_RATE    = new BigDecimal("0.25");  // 25% = $50
+    public static final BigDecimal PLUS_ZENITH_DISCOUNT  = new BigDecimal("100.00"); // desc. al comprar Zenith
 
-    /** 9% -- comisión por referir una venta de Driver (ver §7.2). */
-    public static final BigDecimal DRIVER_REFERRAL_RATE = new BigDecimal("0.09");
-
-    /** 22% -- comisión por referir una venta de Zenith (antes 40%, ver adenda correspondiente en domain-model.md). */
-    public static final BigDecimal ZENITH_REFERRAL_RATE = new BigDecimal("0.22");
+    private PlanPricing() {}
 }

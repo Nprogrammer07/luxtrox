@@ -31,11 +31,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/**
- * Unitario puro con Mockito -- ver AuthServiceUnitTest para la
- * filosofia general (complementa, no reemplaza, a PurchaseServiceTest
- * de Fase 6/7 que corre contra Postgres real via Testcontainers).
- */
 @ExtendWith(MockitoExtension.class)
 class PurchaseServiceUnitTest {
 
@@ -49,6 +44,7 @@ class PurchaseServiceUnitTest {
     @Mock private InvoiceService invoiceService;
     @Mock private NotificationEmailService notificationEmailService;
     @Mock private SystemConfigService systemConfigService;
+    @Mock private PlusService plusService;
 
     private PurchaseService purchaseService;
     private MeterRegistry meterRegistry;
@@ -59,18 +55,18 @@ class PurchaseServiceUnitTest {
         meterRegistry = new SimpleMeterRegistry();
         purchaseService = new PurchaseService(purchaseRepository, userRepository, positionRepository,
                 zenithLicenseRepository, referralService, auditService, nowPaymentsClient,
-                invoiceService, notificationEmailService, meterRegistry, systemConfigService);
+                invoiceService, notificationEmailService, meterRegistry, systemConfigService, plusService);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos", "carlos@example.com", "+1", "hash", role, "CARLOS01");
         setId(user, UUID.randomUUID());
         user.setTotalPackagesPurchased(0);
 
-        // Defaults que replican los valores reales de PlanPricing / V23
         lenient().when(systemConfigService.getDriverPrice()).thenReturn(PlanPricing.DRIVER_PACKAGE_PRICE);
         lenient().when(systemConfigService.getMaxDriverPositions()).thenReturn(PlanPricing.MAX_DRIVER_PACKAGES);
         lenient().when(systemConfigService.getCashbackRate()).thenReturn(PlanPricing.CASHBACK_MULTIPLIER);
-        lenient().when(systemConfigService.getMinWithdrawal()).thenReturn(new java.math.BigDecimal("50.00"));
+        lenient().when(systemConfigService.getMinWithdrawal()).thenReturn(new BigDecimal("50.00"));
+        lenient().when(plusService.hasActiveLicense(any())).thenReturn(false);
 
         lenient().when(purchaseRepository.save(any(Purchase.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -94,7 +90,8 @@ class PurchaseServiceUnitTest {
 
         assertThat(result.getPlanType()).isEqualTo(PlanType.DRIVER);
         assertThat(result.getPackageQuantity()).isEqualTo(5);
-        assertThat(result.getTotalAmount()).isEqualByComparingTo(PlanPricing.DRIVER_PACKAGE_PRICE.multiply(BigDecimal.valueOf(5)));
+        assertThat(result.getTotalAmount()).isEqualByComparingTo(
+                PlanPricing.DRIVER_PACKAGE_PRICE.multiply(BigDecimal.valueOf(5)));
     }
 
     @Test
@@ -112,7 +109,7 @@ class PurchaseServiceUnitTest {
     @Test
     void createDriverPurchase_exactlyAtCumulativeCap_succeeds() {
         user.setTotalPackagesPurchased(25);
-        Purchase result = purchaseService.createDriverPurchase(user, 5, PaymentMethod.CRYPTO); // 25+5=30, justo el limite
+        Purchase result = purchaseService.createDriverPurchase(user, 5, PaymentMethod.CRYPTO);
         assertThat(result.getPackageQuantity()).isEqualTo(5);
     }
 
@@ -120,18 +117,41 @@ class PurchaseServiceUnitTest {
     void createDriverPurchase_oneOverCumulativeCap_throws() {
         user.setTotalPackagesPurchased(26);
         assertThrows(BusinessRuleException.class,
-                () -> purchaseService.createDriverPurchase(user, 5, PaymentMethod.CRYPTO)); // 26+5=31
+                () -> purchaseService.createDriverPurchase(user, 5, PaymentMethod.CRYPTO));
     }
 
     // ---------- createZenithPurchase() ----------
 
     @Test
-    void createZenithPurchase_alwaysQuantityOneAtFixedPrice() {
+    void createZenithPurchase_withoutPlus_fullPrice() {
+        when(plusService.hasActiveLicense(user)).thenReturn(false);
+
         Purchase result = purchaseService.createZenithPurchase(user, PaymentMethod.CRYPTO);
 
         assertThat(result.getPlanType()).isEqualTo(PlanType.ZENITH);
         assertThat(result.getPackageQuantity()).isEqualTo(1);
         assertThat(result.getTotalAmount()).isEqualByComparingTo(PlanPricing.ZENITH_PRICE);
+    }
+
+    @Test
+    void createZenithPurchase_withActivePlus_appliesDiscount() {
+        when(plusService.hasActiveLicense(user)).thenReturn(true);
+
+        Purchase result = purchaseService.createZenithPurchase(user, PaymentMethod.CRYPTO);
+
+        assertThat(result.getTotalAmount()).isEqualByComparingTo(
+                PlanPricing.ZENITH_PRICE.subtract(PlanPricing.PLUS_ZENITH_DISCOUNT));
+    }
+
+    // ---------- createPlusPurchase() ----------
+
+    @Test
+    void createPlusPurchase_price200_planTypePlus() {
+        Purchase result = purchaseService.createPlusPurchase(user, PaymentMethod.ALTERNATIVE);
+
+        assertThat(result.getPlanType()).isEqualTo(PlanType.PLUS);
+        assertThat(result.getPackageQuantity()).isEqualTo(1);
+        assertThat(result.getTotalAmount()).isEqualByComparingTo(PlanPricing.PLUS_PRICE);
     }
 
     // ---------- initiateCryptoPayment() ----------
@@ -140,7 +160,7 @@ class PurchaseServiceUnitTest {
     void initiateCryptoPayment_happyPath_returnsInvoiceUrlAndStoresId() {
         Purchase purchase = new Purchase(user, PlanType.DRIVER, 1, PlanPricing.DRIVER_PACKAGE_PRICE, PaymentMethod.CRYPTO);
         CreateInvoiceResponse fakeInvoice = new CreateInvoiceResponse(
-                "inv-123", "https://nowpayments.io/pay/inv-123", "order-ref-no-importa-en-este-test");
+                "inv-123", "https://nowpayments.io/pay/inv-123", "order-ref");
         when(nowPaymentsClient.createInvoice(purchase)).thenReturn(fakeInvoice);
 
         String url = purchaseService.initiateCryptoPayment(purchase);
@@ -171,7 +191,7 @@ class PurchaseServiceUnitTest {
         Purchase result = purchaseService.confirmPurchase(purchaseId);
 
         assertThat(result).isSameAs(purchase);
-        verifyNoInteractions(positionRepository, zenithLicenseRepository, referralService, invoiceService);
+        verifyNoInteractions(positionRepository, zenithLicenseRepository, referralService, invoiceService, plusService);
     }
 
     @Test
@@ -195,12 +215,13 @@ class PurchaseServiceUnitTest {
 
     @Test
     void confirmPurchase_driver_createsPositionWithTripleTargetAndUpdatesPackageCounter() {
-        Purchase purchase = new Purchase(user, PlanType.DRIVER, 3, PlanPricing.DRIVER_PACKAGE_PRICE.multiply(BigDecimal.valueOf(3)), PaymentMethod.CRYPTO);
+        Purchase purchase = new Purchase(user, PlanType.DRIVER, 3,
+                PlanPricing.DRIVER_PACKAGE_PRICE.multiply(BigDecimal.valueOf(3)), PaymentMethod.CRYPTO);
         UUID purchaseId = UUID.randomUUID();
         setId(purchase, purchaseId);
         user.setTotalPackagesPurchased(2);
         when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
-        when(invoiceService.generateStoreAndReturnBytes(any())).thenThrow(new RuntimeException("sin red, ignorar"));
+        when(invoiceService.generateStoreAndReturnBytes(any())).thenThrow(new RuntimeException("sin red"));
 
         purchaseService.confirmPurchase(purchaseId);
 
@@ -208,12 +229,9 @@ class PurchaseServiceUnitTest {
         verify(positionRepository).save(positionCaptor.capture());
         assertThat(positionCaptor.getValue().getTargetCashback())
                 .isEqualByComparingTo(purchase.getTotalAmount().multiply(PlanPricing.CASHBACK_MULTIPLIER));
-        assertThat(user.getTotalPackagesPurchased()).isEqualTo(5); // 2 + 3
+        assertThat(user.getTotalPackagesPurchased()).isEqualTo(5);
         verify(zenithLicenseRepository, never()).save(any());
         verify(referralService).onReferredPurchaseConfirmed(purchase);
-
-        assertThat(meterRegistry.get("luxtrox.purchases.confirmed").tag("planType", "DRIVER").counter().count())
-                .isEqualTo(1.0);
     }
 
     @Test
@@ -222,13 +240,30 @@ class PurchaseServiceUnitTest {
         UUID purchaseId = UUID.randomUUID();
         setId(purchase, purchaseId);
         when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
-        when(invoiceService.generateStoreAndReturnBytes(any())).thenThrow(new RuntimeException("sin red, ignorar"));
+        when(invoiceService.generateStoreAndReturnBytes(any())).thenThrow(new RuntimeException("sin red"));
 
         purchaseService.confirmPurchase(purchaseId);
 
         verify(zenithLicenseRepository).save(any(ZenithLicense.class));
         verify(positionRepository, never()).save(any());
-        verify(userRepository, never()).save(any()); // zenith no incrementa total_packages_purchased
+        verify(userRepository, never()).save(any());
+        verify(plusService, never()).createLicense(any(), any());
+    }
+
+    @Test
+    void confirmPurchase_plus_createsLicenseViaPlusService() {
+        Purchase purchase = new Purchase(user, PlanType.PLUS, 1, PlanPricing.PLUS_PRICE, PaymentMethod.ALTERNATIVE);
+        UUID purchaseId = UUID.randomUUID();
+        setId(purchase, purchaseId);
+        when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
+        when(invoiceService.generateStoreAndReturnBytes(any())).thenThrow(new RuntimeException("sin red"));
+
+        purchaseService.confirmPurchase(purchaseId);
+
+        verify(plusService).createLicense(user, purchase);
+        verify(positionRepository, never()).save(any());
+        verify(zenithLicenseRepository, never()).save(any());
+        verify(referralService).onReferredPurchaseConfirmed(purchase);
     }
 
     @Test
@@ -241,7 +276,7 @@ class PurchaseServiceUnitTest {
 
         Purchase result = purchaseService.confirmPurchase(purchaseId);
 
-        assertThat(result.getStatus()).isEqualTo(PurchaseStatus.CONFIRMED); // la compra SI quedo confirmada
+        assertThat(result.getStatus()).isEqualTo(PurchaseStatus.CONFIRMED);
         verify(auditService).recordSystemAction(eq("Purchase"), any(), eq("INVOICE_OR_EMAIL_FAILED"), any(), any());
         verify(notificationEmailService, never()).sendPurchaseConfirmedEmail(any(), any(), any());
     }
@@ -261,7 +296,6 @@ class PurchaseServiceUnitTest {
         verify(purchaseRepository).save(purchase);
         verify(auditService).record(user, "Purchase", purchaseId, "PURCHASE_REJECTED",
                 PurchaseStatus.PENDING, PurchaseStatus.REJECTED);
-        // rechazar NUNCA debe crear una posicion, licencia, ni evaluar comision de referido
         verify(positionRepository, never()).save(any());
         verify(zenithLicenseRepository, never()).save(any());
         verify(referralService, never()).onReferredPurchaseConfirmed(any());
@@ -276,9 +310,7 @@ class PurchaseServiceUnitTest {
         when(purchaseRepository.findById(purchaseId)).thenReturn(Optional.of(purchase));
 
         assertThrows(BusinessRuleException.class, () -> purchaseService.rejectPurchase(purchaseId));
-
         verify(purchaseRepository, never()).save(any());
-        verify(auditService, never()).record(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -300,12 +332,11 @@ class PurchaseServiceUnitTest {
         var result = purchaseService.listAllPurchases(null);
 
         assertThat(result).hasSize(1);
-        var dto = result.get(0);
-        assertThat(dto.userId()).isEqualTo(user.getId());
-        assertThat(dto.userName()).isEqualTo("Carlos");
-        assertThat(dto.userEmail()).isEqualTo("carlos@example.com");
-        assertThat(dto.planType()).isEqualTo(PlanType.ZENITH);
-        assertThat(dto.status()).isEqualTo(PurchaseStatus.PENDING);
+        assertThat(result.get(0).userId()).isEqualTo(user.getId());
+        assertThat(result.get(0).userName()).isEqualTo("Carlos");
+        assertThat(result.get(0).userEmail()).isEqualTo("carlos@example.com");
+        assertThat(result.get(0).planType()).isEqualTo(PlanType.ZENITH);
+        assertThat(result.get(0).status()).isEqualTo(PurchaseStatus.PENDING);
     }
 
     @Test

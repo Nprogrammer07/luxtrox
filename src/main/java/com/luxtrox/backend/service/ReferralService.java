@@ -7,6 +7,9 @@ import com.luxtrox.backend.entity.enums.ReferralStatus;
 import com.luxtrox.backend.repository.*;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,27 +19,14 @@ import java.time.OffsetDateTime;
 import java.util.Optional;
 
 /**
- * Comisiones de referido -- VERSION SIMPLIFICADA (adenda posterior a
- * las Fases 6, 8 y 17 del domain-model.md).
- *
- * Reglas actuales:
- *   - El referente NO necesita haber comprado ningun plan. Cualquier
- *     persona que tenga un codigo de referido activo recibe comision
- *     automaticamente cuando alguien se registra con ese codigo y hace
- *     una compra.
- *   - La comision se calcula por CADA compra confirmada del referido,
- *     sin limite: Driver = 9% del precio, Zenith = 22% del precio.
- *   - Se acredita SIEMPRE de forma directa a available_balance del
- *     referente (REFERRAL_BONUS_DIRECT), sin verificar si tiene
- *     posicion activa ni licencia Zenith.
- *   - El Referral se marca RESOLVED la primera vez que el referido
- *     compra algo (para que el admin distinga "todavia no compro" de
- *     "ya hay al menos una comision pagada"), pero RESOLVED ya NO
- *     bloquea evaluaciones futuras -- cada compra sigue generando
- *     su propia comision.
+ * Comisiones de referido — sin restricciones de plan, por compra.
+ * Driver = 9%, Zenith = 22%, Plus = 25% ($50 flat).
+ * Todas van directo al available_balance (REFERRAL_BONUS_DIRECT).
  */
 @Service
 public class ReferralService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReferralService.class);
 
     private final ReferralRepository referralRepository;
     private final UserRepository userRepository;
@@ -59,48 +49,36 @@ public class ReferralService {
         this.meterRegistry = meterRegistry;
     }
 
-    /** Driver = 9% del precio, Zenith = 22% del precio. */
+    /** Driver=9%, Zenith=22%, Plus=25% de la compra. */
     public BigDecimal calculateCommission(Purchase referredPurchase) {
-        BigDecimal rate = referredPurchase.getPlanType() == PlanType.DRIVER
-                ? PlanPricing.DRIVER_REFERRAL_RATE
-                : PlanPricing.ZENITH_REFERRAL_RATE;
+        BigDecimal rate = switch (referredPurchase.getPlanType()) {
+            case DRIVER -> PlanPricing.DRIVER_REFERRAL_RATE;
+            case ZENITH -> PlanPricing.ZENITH_REFERRAL_RATE;
+            case PLUS   -> PlanPricing.PLUS_REFERRAL_RATE;
+        };
         return referredPurchase.getTotalAmount()
                 .multiply(rate)
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
-    /**
-     * Disparador: una compra del referido se confirma. Paga comision
-     * directa al balance del referente, sin restricciones de plan.
-     *
-     * USA referralRepository.findByReferred() como primer paso (no
-     * referredUser.getReferredBy()) para evitar problemas de proxy
-     * LAZY en el contexto HTTP: cuando Purchase.user es un proxy de
-     * Hibernate sin inicializar completamente, getReferredBy() puede
-     * devolver null aunque el campo este correctamente guardado en BD.
-     * La busqueda en repositorio evita esa ambigüedad -- si no hay
-     * fila de Referral, el usuario no fue referido por nadie.
-     */
     @Transactional
     public void onReferredPurchaseConfirmed(Purchase confirmedPurchase) {
         User referredUser = confirmedPurchase.getUser();
 
         Optional<Referral> referralOpt = referralRepository.findByReferred(referredUser);
         if (referralOpt.isEmpty()) {
-            return; // no fue referido por nadie
+            return;
         }
 
         Referral referral = referralOpt.get();
         User referrer = referral.getReferrer();
         BigDecimal commission = calculateCommission(confirmedPurchase);
 
-        // Transaccion: REFERRAL_BONUS_DIRECT siempre (sin posicion asociada)
         CashbackTransaction tx = new CashbackTransaction(
                 referrer, CashbackTransactionType.REFERRAL_BONUS_DIRECT, commission);
         tx.setSourceReferral(referral);
         cashbackTransactionRepository.save(tx);
 
-        // Credito directo al balance
         BigDecimal oldBalance = referrer.getAvailableBalance();
         referrer.setAvailableBalance(oldBalance.add(commission));
         userRepository.save(referrer);
@@ -117,7 +95,6 @@ public class ReferralService {
         referral.setBonusPaidAt(OffsetDateTime.now());
         referral.setTriggeringPurchase(confirmedPurchase);
 
-        // Primera compra: registrar fecha y marcar RESOLVED (solo informativo)
         if (referral.getStatus() == ReferralStatus.PENDING_PURCHASE) {
             referral.setQualifiedAt(OffsetDateTime.now());
             referral.setStatus(ReferralStatus.RESOLVED);
