@@ -59,7 +59,7 @@ class AlternativePaymentServiceUnitTest {
         admin = new User("Admin", "admin@example.com", "+1", "hash", adminRole, "ADMIN001");
         setId(admin, UUID.randomUUID());
 
-        purchase = new Purchase(buyer, PlanType.DRIVER, 1, new BigDecimal("1099.00"), PaymentMethod.ALTERNATIVE);
+        purchase = new Purchase(buyer, PlanType.ZENITH, 1, new BigDecimal("1099.00"), PaymentMethod.ALTERNATIVE);
         setId(purchase, UUID.randomUUID());
 
         lenient().when(alternativePaymentRequestRepository.save(any(AlternativePaymentRequest.class)))
@@ -96,7 +96,7 @@ class AlternativePaymentServiceUnitTest {
 
     @Test
     void createRequest_wrongPaymentMethod_throws() {
-        Purchase cryptoPurchase = new Purchase(buyer, PlanType.DRIVER, 1, new BigDecimal("1099.00"), PaymentMethod.CRYPTO);
+        Purchase cryptoPurchase = new Purchase(buyer, PlanType.ZENITH, 1, new BigDecimal("1099.00"), PaymentMethod.CRYPTO);
 
         assertThrows(BusinessRuleException.class, () -> service.createRequest(cryptoPurchase));
         verifyNoInteractions(alternativePaymentRequestRepository);

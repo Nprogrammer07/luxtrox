@@ -3,13 +3,14 @@ package com.luxtrox.backend.dto.cashback;
 import java.math.BigDecimal;
 
 /**
- * Ver CashbackQueryService para el mapeo completo. Nota: totalGenerated
- * y totalReceived son el MISMO valor en este backend -- el motor de
- * cashback credita el saldo de forma inmediata al distribuir, no
- * existe un estado intermedio "generado pero no recibido todavia".
- * Se exponen como dos campos separados solo porque asi los definio el
- * frontend (Next.js) de forma especulativa antes de que este backend
- * existiera.
+ * Resumen de saldo del usuario. Tras eliminar el módulo Driver ya no
+ * hay "meta final" ni progreso de cashback por posiciones: los campos
+ * targetFinal, progress y seminarsCount se conservan en 0 solo porque
+ * el tipo CashbackSummary del frontend (Next.js) los define.
+ *
+ * available       = saldo disponible para retirar (comisiones + créditos)
+ * totalGenerated  = total histórico acreditado al usuario
+ * totalReceived   = igual a totalGenerated (sin distinción tras Driver)
  */
 public record CashbackSummaryResponse(
         BigDecimal totalGenerated,

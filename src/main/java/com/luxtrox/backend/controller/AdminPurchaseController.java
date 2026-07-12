@@ -1,7 +1,6 @@
 package com.luxtrox.backend.controller;
 
 import com.luxtrox.backend.dto.purchase.AdminPurchaseResponse;
-import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.entity.Purchase;
 import com.luxtrox.backend.entity.enums.PurchaseStatus;
@@ -16,10 +15,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Acciones de administrador sobre compras y licencias Zenith. Vive
- * deliberadamente bajo /admin/** (no /purchases/admin/...) porque
- * SecurityConfig protege por PREFIJO de ruta -- solo lo que empieza
- * literalmente con /admin/ exige hasRole("ADMIN").
+ * Acciones de administrador sobre compras y licencias Zenith.
+ * Vive bajo /admin/** porque SecurityConfig protege por PREFIJO de ruta.
  */
 @RestController
 @RequestMapping("/admin/purchases")
@@ -34,18 +31,6 @@ public class AdminPurchaseController {
         this.zenithService = zenithService;
     }
 
-    @GetMapping
-    @Operation(summary = "Listar todos los 'seminarios' (posiciones Driver confirmadas), de todos los usuarios")
-    public List<AdminSeminarResponse> listSeminars() {
-        return purchaseService.listAllSeminars();
-    }
-
-    /**
-     * Distinto de GET /admin/purchases -- esto incluye PENDING (que
-     * es justo lo que el admin necesita revisar para aprobar o
-     * rechazar; listSeminars() solo puede mostrar lo YA confirmado,
-     * porque la InvestmentPosition ni siquiera existe en PENDING).
-     */
     @GetMapping("/requests")
     @Operation(summary = "Listar todas las compras (cualquier plan, cualquier status) para aprobar/rechazar")
     public List<AdminPurchaseResponse> listPurchaseRequests(@RequestParam(required = false) PurchaseStatus status) {
@@ -53,7 +38,7 @@ public class AdminPurchaseController {
     }
 
     @PostMapping("/{purchaseId}/confirm")
-    @Operation(summary = "Confirmar una compra ya pagada (crea posicion o licencia segun el plan). "
+    @Operation(summary = "Confirmar una compra ya pagada (crea licencia Zenith o Plus segun el plan). "
             + "Solo deberia usarse para compras ALTERNATIVE -- las CRYPTO se confirman solas via webhook.")
     public ResponseEntity<PurchaseResponse> confirm(@PathVariable UUID purchaseId) {
         Purchase purchase = purchaseService.confirmPurchase(purchaseId);

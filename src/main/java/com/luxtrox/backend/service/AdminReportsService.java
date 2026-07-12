@@ -5,7 +5,6 @@ import com.luxtrox.backend.dto.adminreports.ChartDataPointResponse;
 import com.luxtrox.backend.entity.enums.UserStatus;
 import com.luxtrox.backend.entity.enums.WithdrawalStatus;
 import com.luxtrox.backend.repository.CashbackTransactionRepository;
-import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.PurchaseRepository;
 import com.luxtrox.backend.repository.ReferralRepository;
 import com.luxtrox.backend.repository.UserRepository;
@@ -24,39 +23,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Dashboard agregado de admin -- pedido por el frontend (Next.js),
- * que ya tenia el tipo `AdminStats` y 3 endpoints de graficas
- * definidos de forma especulativa antes de que este backend
- * existiera. Aqui el mapeo de cada campo contra las tablas reales:
+ * Estadisticas del panel de admin. Tras eliminar el modulo Driver,
+ * los campos de posiciones (totalPositions, totalCapital) se reportan
+ * como 0 -- el DTO AdminStatsResponse mantiene su forma para no romper
+ * el frontend, pero esos valores ya no aplican a Zenith/Plus.
  *
- * - totalUsers / activeUsers: conteo de users, activeUsers = status ACTIVE.
- * - totalSeminars: "seminario" en el frontend = un paquete Driver
- *   comprado = una InvestmentPosition en este backend. Zenith NO
- *   cuenta -- genera ZenithLicense, no participa del motor de
- *   cashback (ver PurchaseService), asi que no es un "seminario" en
- *   ese sentido.
- * - totalCapital: SUM(capital) de InvestmentPosition -- por la misma
- *   razon, es capital de Driver unicamente.
- * - totalCashbackPaid: SUM(amount) de CashbackTransaction -- los 4
- *   tipos representan dinero realmente repartido (no existe un tipo
- *   "FORFEITED": los montos no aplicados nunca generan fila aqui).
- * - pendingWithdrawals(Amount): WithdrawalRequest con status
- *   REQUESTED (el nombre "pending" del frontend es REQUESTED aqui).
- * - totalReferrals: COUNT(*) de Referral, sin filtrar por status --
- *   el "total" mas literal posible.
- * - monthlyRevenue: SUM(total_amount) de compras CONFIRMADAS del mes
- *   calendario actual.
- * - monthlyGrowth: cambio porcentual de monthlyRevenue contra el mes
- *   calendario anterior. Si el mes anterior fue 0: 100% si este mes
- *   tiene ingreso, 0% si tambien fue 0 (evita dividir por cero).
- *
- * Las 3 graficas (revenue/users/referrals) cubren los ultimos 6
- * meses calendario, incluyendo el actual -- ventana fija, sin
- * parametro porque el tipo ChartDataPoint del frontend no define una.
- * Los meses sin actividad se rellenan con 0 explicitamente: una
- * consulta GROUP BY normal simplemente OMITE esos meses, lo que
- * dejaria huecos en la grafica del frontend en vez de mostrar un
- * punto en cero.
+ * totalCashbackPaid ahora es SUM de comisiones de referido + creditos
+ * manuales (los dos unicos tipos que quedan en cashback_transactions).
  */
 @Service
 public class AdminReportsService {
@@ -65,20 +38,17 @@ public class AdminReportsService {
     private static final DateTimeFormatter MONTH_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
 
     private final UserRepository userRepository;
-    private final InvestmentPositionRepository positionRepository;
     private final CashbackTransactionRepository cashbackTransactionRepository;
     private final WithdrawalRequestRepository withdrawalRequestRepository;
     private final ReferralRepository referralRepository;
     private final PurchaseRepository purchaseRepository;
 
     public AdminReportsService(UserRepository userRepository,
-                                InvestmentPositionRepository positionRepository,
                                 CashbackTransactionRepository cashbackTransactionRepository,
                                 WithdrawalRequestRepository withdrawalRequestRepository,
                                 ReferralRepository referralRepository,
                                 PurchaseRepository purchaseRepository) {
         this.userRepository = userRepository;
-        this.positionRepository = positionRepository;
         this.cashbackTransactionRepository = cashbackTransactionRepository;
         this.withdrawalRequestRepository = withdrawalRequestRepository;
         this.referralRepository = referralRepository;
@@ -97,9 +67,9 @@ public class AdminReportsService {
         return new AdminStatsResponse(
                 userRepository.count(),
                 userRepository.countByStatus(UserStatus.ACTIVE),
-                positionRepository.count(),
-                positionRepository.sumCapital(),
-                cashbackTransactionRepository.sumAmount(),
+                0L,                                   // totalPositions -- Driver eliminado
+                BigDecimal.ZERO,                      // totalCapital -- Driver eliminado
+                cashbackTransactionRepository.sumAllCommissionsAndCredits(),
                 withdrawalRequestRepository.countByStatus(WithdrawalStatus.REQUESTED),
                 withdrawalRequestRepository.sumAmountByStatus(WithdrawalStatus.REQUESTED),
                 referralRepository.count(),
@@ -138,13 +108,6 @@ public class AdminReportsService {
         return fillLastMonths(byMonth, BigDecimal.ZERO);
     }
 
-    /**
-     * Las columnas de conteo/suma de consultas nativas pueden volver
-     * como Long, Integer o BigInteger segun el driver JDBC -- castear
-     * directo a un tipo especifico arriesga ClassCastException. Number
-     * es la unica superclase comun garantizada para cualquier numero
-     * que JDBC devuelva.
-     */
     private BigDecimal toBigDecimal(Object value) {
         if (value instanceof BigDecimal bd) {
             return bd;
@@ -166,7 +129,6 @@ public class AdminReportsService {
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
-    /** Genera los ultimos CHART_WINDOW_MONTHS meses (incluyendo el actual), rellenando con defaultValue donde la consulta no trajo nada. */
     private List<ChartDataPointResponse> fillLastMonths(Map<String, BigDecimal> byMonth, BigDecimal defaultValue) {
         OffsetDateTime cursor = startOfMonth(OffsetDateTime.now(ZoneOffset.UTC)).minusMonths(CHART_WINDOW_MONTHS - 1L);
         List<ChartDataPointResponse> result = new ArrayList<>();

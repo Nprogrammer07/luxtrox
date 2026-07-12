@@ -10,7 +10,6 @@ import com.luxtrox.backend.entity.enums.CashbackTransactionType;
 import com.luxtrox.backend.entity.enums.UserStatus;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
 import com.luxtrox.backend.repository.CashbackTransactionRepository;
-import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,39 +19,21 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Perfil del usuario + gestion de usuarios para admin -- pedido por
- * el frontend (Next.js), que ya tenia un UserController completo
- * imaginado (GET/PUT /users/me, GET/PATCH /admin/users/...) antes de
- * que este backend existiera. No existia ningun controller para esto
- * hasta ahora.
+ * Perfil del usuario + gestion de usuarios para admin.
  *
- * Simplificaciones deliberadas (ver tambien UserProfileResponse):
- * - avatar/country/walletAddress/blockchainNetwork del tipo `User`
- *   del frontend: no tienen columna real -- se omiten de la
- *   respuesta (son opcionales en ese tipo).
- * - GET /admin/users/{id} devuelve el mismo UserProfileResponse que
- *   /users/me, SIN el `AdminUser` extendido que el frontend tambien
- *   define (seminars/cashbackSummary/withdrawals anidados) -- esa
- *   agregacion mas pesada queda pendiente; si se necesita, el
- *   frontend puede llamar /cashback/summary y /withdrawals por
- *   separado mientras tanto.
- * - listUsers() no implementa paginacion real de servidor (igual que
- *   los demas listados de admin de este backend) ni evita el N+1 al
- *   calcular seminarsCount/totalInvested por cada usuario listado --
- *   aceptable para una base de usuarios de etapa temprana, revisar si
- *   eso cambia.
+ * Tras eliminar el modulo Driver ya no existen posiciones: seminarsCount
+ * y totalInvested se reportan como 0 / BigDecimal.ZERO (el tipo del
+ * frontend los sigue esperando pero ya no aplican a Zenith/Plus).
  */
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
-    private final InvestmentPositionRepository positionRepository;
     private final CashbackTransactionRepository cashbackTransactionRepository;
 
-    public UserService(UserRepository userRepository, InvestmentPositionRepository positionRepository,
+    public UserService(UserRepository userRepository,
                        CashbackTransactionRepository cashbackTransactionRepository) {
         this.userRepository = userRepository;
-        this.positionRepository = positionRepository;
         this.cashbackTransactionRepository = cashbackTransactionRepository;
     }
 
@@ -94,13 +75,11 @@ public class UserService {
      * Credito manual del admin -- acredita amount a available_balance
      * del usuario y registra la transaccion como MANUAL_CREDIT para
      * auditoria completa. reason (PERFORMANCE/COMMISSION) queda en las
-     * notes de la transaccion; el frontend lo muestra en la fila del
-     * historial del admin.
+     * notes de la transaccion.
      */
     @Transactional
     public UserProfileResponse manualCredit(UUID userId, ManualCreditRequest request) {
         User user = findOrThrow(userId);
-
         user.setAvailableBalance(user.getAvailableBalance().add(request.amount()));
         userRepository.save(user);
 
@@ -116,23 +95,12 @@ public class UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
     }
 
-    /**
-     * El User que llega como parametro a getProfile()/updateProfile()
-     * (via CustomUserPrincipal.getUser(), cargado durante la
-     * autenticacion del request, ANTES de que arrancara la
-     * transaccion de este metodo) viene de una sesion de Hibernate ya
-     * cerrada -- abrir un @Transactional nuevo aqui NO reconecta
-     * automaticamente ese objeto a la sesion actual. Volver a
-     * cargarlo por su id si garantiza que sus relaciones LAZY
-     * (referredBy) queden atadas a la sesion abierta de ESTE metodo.
-     */
     private User freshCopyOf(User user) {
         return findOrThrow(user.getId());
     }
 
     private UserProfileResponse toResponse(User user) {
-        long seminarsCount = positionRepository.countByUser(user);
-        BigDecimal totalInvested = positionRepository.sumCapitalByUser(user);
-        return UserProfileResponse.from(user, seminarsCount, totalInvested);
+        // Sin modulo Driver ya no hay seminarios ni capital invertido.
+        return UserProfileResponse.from(user, 0L, BigDecimal.ZERO);
     }
 }

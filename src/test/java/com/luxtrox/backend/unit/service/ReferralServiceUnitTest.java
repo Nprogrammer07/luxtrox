@@ -25,10 +25,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Comisiones de referido -- VERSION SIMPLIFICADA.
+ * Comisiones de referido -- planes Zenith (22%) y Plus (25% = $50 flat).
  * Sin restricciones de plan: cualquier persona con codigo de referido
- * recibe comision por CADA compra confirmada del referido,
- * independientemente del plan y sin haber comprado ningun plan propio.
+ * recibe comision por CADA compra confirmada del referido.
  */
 @ExtendWith(MockitoExtension.class)
 class ReferralServiceUnitTest {
@@ -83,40 +82,38 @@ class ReferralServiceUnitTest {
     // ---------- calculateCommission() ----------
 
     @Test
-    void calculateCommission_driver_isNinePercent() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
-        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("98.91");
-    }
-
-    @Test
     void calculateCommission_zenith_isTwentyTwoPercent() {
         Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
         assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("505.78");
     }
 
-    // ---------- onReferredPurchaseConfirmed() -- sin referente ----------
+    @Test
+    void calculateCommission_plus_isTwentyFivePercent() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
+        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("50.00");
+    }
+
+    // ---------- sin referente ----------
 
     @Test
     void buyerHasNoReferrer_doesNothingAtAll() {
         referred.setReferredBy(null);
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
-        // El repositorio es ahora la fuente de verdad -- se consulta siempre.
-        // Si no hay fila de Referral, devolvemos empty y no se hace nada mas.
-        when(referralRepository.findByReferred(referred)).thenReturn(java.util.Optional.empty());
+        Purchase purchase = confirmedPurchase(referred, PlanType.ZENITH, new BigDecimal("2299.00"));
+        when(referralRepository.findByReferred(referred)).thenReturn(Optional.empty());
 
         service.onReferredPurchaseConfirmed(purchase);
 
-        verify(referralRepository).findByReferred(referred); // SI se consulto
+        verify(referralRepository).findByReferred(referred);
         verifyNoInteractions(cashbackTransactionRepository, userRepository,
                 notificationEmailService, auditService);
-        verify(referralRepository, never()).save(any()); // pero NO se guardo nada
+        verify(referralRepository, never()).save(any());
     }
 
-    // ---------- Commission directa -- sin restricciones de plan ----------
+    // ---------- Commission directa ----------
 
     @Test
-    void driverPurchase_referrerWithNoPlan_stillReceivesNinePercent() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00")); // 98.91
+    void plusPurchase_referrerWithNoPlan_stillReceivesFiftyUsd() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00")); // 50.00
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
@@ -125,17 +122,17 @@ class ReferralServiceUnitTest {
 
         ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
         verify(cashbackTransactionRepository).save(txCaptor.capture());
-        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("98.91");
+        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("50.00");
         assertThat(txCaptor.getValue().getType()).isEqualTo(CashbackTransactionType.REFERRAL_BONUS_DIRECT);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("98.91");
+        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("50.00");
 
-        verify(notificationEmailService).sendReferralBonusReceivedEmail(referrer, new BigDecimal("98.91"));
+        verify(notificationEmailService).sendReferralBonusReceivedEmail(referrer, new BigDecimal("50.00"));
 
         assertThat(meterRegistry.get("luxtrox.referral.commission.paid")
-                .tag("planType", "DRIVER").counter().count()).isEqualTo(98.91);
+                .tag("planType", "PLUS").counter().count()).isEqualTo(50.00);
     }
 
     @Test
@@ -160,11 +157,11 @@ class ReferralServiceUnitTest {
                 .tag("planType", "ZENITH").counter().count()).isEqualTo(505.78);
     }
 
-    // ---------- Por compra (repetible) -- RESOLVED ya no bloquea ----------
+    // ---------- Por compra (repetible) ----------
 
     @Test
     void firstPurchase_referralMovesToResolved() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
         Referral referral = newReferral();
         assertThat(referral.getStatus()).isEqualTo(ReferralStatus.PENDING_PURCHASE);
 
@@ -179,9 +176,7 @@ class ReferralServiceUnitTest {
 
     @Test
     void secondPurchaseFromSameReferredPerson_referralAlreadyResolved_stillPaysCommission() {
-        // ANTES: RESOLVED bloqueaba nuevas evaluaciones (una por persona).
-        // AHORA: cada compra genera su propia comision, sin limite.
-        Purchase secondPurchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
+        Purchase secondPurchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
         Referral alreadyResolved = newReferral();
         alreadyResolved.setStatus(ReferralStatus.RESOLVED);
 
@@ -189,29 +184,27 @@ class ReferralServiceUnitTest {
 
         service.onReferredPurchaseConfirmed(secondPurchase);
 
-        // La comision SI se paga aunque el Referral ya estuviera RESOLVED.
         verify(cashbackTransactionRepository).save(any(CashbackTransaction.class));
         verify(userRepository).save(any(User.class));
-        // El Referral YA estaba RESOLVED, no cambia de nuevo.
         ArgumentCaptor<Referral> referralCaptor = ArgumentCaptor.forClass(Referral.class);
         verify(referralRepository).save(referralCaptor.capture());
         assertThat(referralCaptor.getValue().getStatus()).isEqualTo(ReferralStatus.RESOLVED);
     }
 
-    // ---------- Fallo de email no tumba el pago ----------
+    // ---------- Fallo de email ----------
 
     @Test
     void emailFailure_stillCompletesThePaymentAndAudits() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.DRIVER, new BigDecimal("1099.00"));
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
         doThrow(new RuntimeException("Resend caido")).when(notificationEmailService)
                 .sendReferralBonusReceivedEmail(any(), any());
 
-        service.onReferredPurchaseConfirmed(purchase); // no debe propagar la excepcion
+        service.onReferredPurchaseConfirmed(purchase);
 
-        verify(userRepository).save(any(User.class)); // el pago SI se completo
+        verify(userRepository).save(any(User.class));
         verify(auditService).recordSystemAction(eq("User"), any(),
                 eq("REFERRAL_EMAIL_NOTIFICATION_FAILED"), any(), any());
     }

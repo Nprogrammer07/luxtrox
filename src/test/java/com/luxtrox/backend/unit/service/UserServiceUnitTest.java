@@ -8,7 +8,6 @@ import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.UserStatus;
 import com.luxtrox.backend.exception.ResourceNotFoundException;
 import com.luxtrox.backend.repository.CashbackTransactionRepository;
-import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,15 +16,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,7 +29,6 @@ import static org.mockito.Mockito.when;
 class UserServiceUnitTest {
 
     @Mock private UserRepository userRepository;
-    @Mock private InvestmentPositionRepository positionRepository;
     @Mock private CashbackTransactionRepository cashbackTransactionRepository;
 
     private UserService service;
@@ -41,14 +36,11 @@ class UserServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        service = new UserService(userRepository, positionRepository, cashbackTransactionRepository);
+        service = new UserService(userRepository, cashbackTransactionRepository);
 
         Role role = new Role("USER", "Usuario estandar");
         user = new User("Carlos Perez", "carlos@example.com", "+1111", "hash", role, "CARLOS01");
         setId(user, UUID.randomUUID());
-
-        lenient().when(positionRepository.countByUser(any())).thenReturn(3L);
-        lenient().when(positionRepository.sumCapitalByUser(any())).thenReturn(new BigDecimal("3297.00"));
     }
 
     private void setId(Object entity, UUID id) {
@@ -62,7 +54,7 @@ class UserServiceUnitTest {
     }
 
     @Test
-    void getProfile_mapsFieldsIncludingComputedSeminarsAndCapital() {
+    void getProfile_mapsFields_seminarsAndCapitalAreZeroAfterDriverRemoval() {
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
 
         UserProfileResponse response = service.getProfile(user);
@@ -71,8 +63,8 @@ class UserServiceUnitTest {
         assertThat(response.name()).isEqualTo("Carlos Perez");
         assertThat(response.email()).isEqualTo("carlos@example.com");
         assertThat(response.role()).isEqualTo("USER");
-        assertThat(response.seminarsCount()).isEqualTo(3L);
-        assertThat(response.totalInvested()).isEqualByComparingTo("3297.00");
+        assertThat(response.seminarsCount()).isEqualTo(0L);
+        assertThat(response.totalInvested()).isEqualByComparingTo("0");
         assertThat(response.status()).isEqualTo("ACTIVE");
     }
 
@@ -127,17 +119,13 @@ class UserServiceUnitTest {
     @Test
     void getUserById_found_returnsProfile() {
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
-
-        UserProfileResponse response = service.getUserById(user.getId());
-
-        assertThat(response.email()).isEqualTo("carlos@example.com");
+        assertThat(service.getUserById(user.getId()).email()).isEqualTo("carlos@example.com");
     }
 
     @Test
     void getUserById_notFound_throws() {
         UUID id = UUID.randomUUID();
         when(userRepository.findById(id)).thenReturn(Optional.empty());
-
         assertThrows(ResourceNotFoundException.class, () -> service.getUserById(id));
     }
 
@@ -156,7 +144,6 @@ class UserServiceUnitTest {
     void updateUserStatus_unknownId_throwsAndNeverSaves() {
         UUID id = UUID.randomUUID();
         when(userRepository.findById(id)).thenReturn(Optional.empty());
-
         assertThrows(ResourceNotFoundException.class,
                 () -> service.updateUserStatus(id, new UpdateUserStatusRequest(UserStatus.SUSPENDED)));
     }

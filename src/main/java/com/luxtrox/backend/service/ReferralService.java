@@ -9,7 +9,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,11 +17,6 @@ import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 
-/**
- * Comisiones de referido — sin restricciones de plan, por compra.
- * Driver = 9%, Zenith = 22%, Plus = 25% ($50 flat).
- * Todas van directo al available_balance (REFERRAL_BONUS_DIRECT).
- */
 @Service
 public class ReferralService {
 
@@ -49,10 +43,9 @@ public class ReferralService {
         this.meterRegistry = meterRegistry;
     }
 
-    /** Driver=9%, Zenith=22%, Plus=25% de la compra. */
+    /** Zenith=22%, Plus=25%. */
     public BigDecimal calculateCommission(Purchase referredPurchase) {
         BigDecimal rate = switch (referredPurchase.getPlanType()) {
-            case DRIVER -> PlanPricing.DRIVER_REFERRAL_RATE;
             case ZENITH -> PlanPricing.ZENITH_REFERRAL_RATE;
             case PLUS   -> PlanPricing.PLUS_REFERRAL_RATE;
         };
@@ -64,11 +57,8 @@ public class ReferralService {
     @Transactional
     public void onReferredPurchaseConfirmed(Purchase confirmedPurchase) {
         User referredUser = confirmedPurchase.getUser();
-
         Optional<Referral> referralOpt = referralRepository.findByReferred(referredUser);
-        if (referralOpt.isEmpty()) {
-            return;
-        }
+        if (referralOpt.isEmpty()) return;
 
         Referral referral = referralOpt.get();
         User referrer = referral.getReferrer();
@@ -87,24 +77,18 @@ public class ReferralService {
                 oldBalance, referrer.getAvailableBalance());
 
         Counter.builder("luxtrox.referral.commission.paid")
-                .description("Total en dolares pagado por comisiones de referido")
                 .tag("planType", confirmedPurchase.getPlanType().name())
                 .register(meterRegistry)
                 .increment(commission.doubleValue());
 
         referral.setBonusPaidAt(OffsetDateTime.now());
         referral.setTriggeringPurchase(confirmedPurchase);
-
         if (referral.getStatus() == ReferralStatus.PENDING_PURCHASE) {
             referral.setQualifiedAt(OffsetDateTime.now());
             referral.setStatus(ReferralStatus.RESOLVED);
         }
         referralRepository.save(referral);
 
-        notifyReferrerQuietly(referrer, commission);
-    }
-
-    private void notifyReferrerQuietly(User referrer, BigDecimal commission) {
         try {
             notificationEmailService.sendReferralBonusReceivedEmail(referrer, commission);
         } catch (Exception e) {

@@ -1,7 +1,6 @@
 package com.luxtrox.backend.controller;
 
 import com.luxtrox.backend.dto.plus.PlusLicenseResponse;
-import com.luxtrox.backend.dto.purchase.AdminSeminarResponse;
 import com.luxtrox.backend.dto.purchase.CreatePurchaseRequest;
 import com.luxtrox.backend.dto.purchase.PurchaseResponse;
 import com.luxtrox.backend.dto.purchase.ZenithLicenseResponse;
@@ -25,7 +24,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/purchases")
-@Tag(name = "Purchases", description = "Compras de los planes Driver, Zenith y Plus")
+@Tag(name = "Purchases", description = "Compras de los planes Zenith y Plus")
 public class PurchaseController {
 
     private final PurchaseService purchaseService;
@@ -47,23 +46,12 @@ public class PurchaseController {
     }
 
     @PostMapping
-    @Operation(summary = "Crear una compra (Driver, Zenith o Plus) en estado PENDING. "
-            + "Si paymentMethod=CRYPTO, la respuesta incluye cryptoInvoiceUrl para redirigir al usuario a pagar. "
-            + "Si paymentMethod=ALTERNATIVE, se crea automáticamente la solicitud de pago manual.")
+    @Operation(summary = "Crear una compra (Zenith o Plus) en estado PENDING")
     public ResponseEntity<PurchaseResponse> create(@AuthenticationPrincipal CustomUserPrincipal principal,
                                                     @Valid @RequestBody CreatePurchaseRequest request) {
-        Purchase purchase;
-        if (request.planType() == PlanType.DRIVER) {
-            purchase = purchaseService.createDriverPurchase(
-                    principal.getUser(), request.packageQuantity(), request.paymentMethod());
-        } else if (request.planType() == PlanType.ZENITH) {
-            purchase = purchaseService.createZenithPurchase(
-                    principal.getUser(), request.paymentMethod());
-        } else {
-            // PLUS
-            purchase = purchaseService.createPlusPurchase(
-                    principal.getUser(), request.paymentMethod());
-        }
+        Purchase purchase = request.planType() == PlanType.ZENITH
+                ? purchaseService.createZenithPurchase(principal.getUser(), request.paymentMethod())
+                : purchaseService.createPlusPurchase(principal.getUser(), request.paymentMethod());
 
         String cryptoInvoiceUrl = null;
         if (purchase.getPaymentMethod() == PaymentMethod.CRYPTO) {
@@ -79,16 +67,9 @@ public class PurchaseController {
     @Operation(summary = "Listar mis propias compras")
     public ResponseEntity<List<PurchaseResponse>> myPurchases(
             @AuthenticationPrincipal CustomUserPrincipal principal) {
-        List<PurchaseResponse> response = purchaseRepository.findByUser(principal.getUser())
-                .stream().map(p -> toResponse(p, null)).toList();
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/positions")
-    @Operation(summary = "Listar mis seminarios Driver (InvestmentPosition confirmadas)")
-    public List<AdminSeminarResponse> myPositions(
-            @AuthenticationPrincipal CustomUserPrincipal principal) {
-        return purchaseService.listMySeminars(principal.getUser());
+        return ResponseEntity.ok(
+                purchaseRepository.findByUser(principal.getUser())
+                        .stream().map(p -> toResponse(p, null)).toList());
     }
 
     @GetMapping("/zenith-licenses")

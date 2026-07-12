@@ -6,15 +6,9 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Un registro por usuario referido (unique referred_user_id). La
- * comision se evalua y resuelve UNA SOLA VEZ por cada compra del
- * referido, en el momento exacto en que se confirma -- sin reintentos
- * (ver docs/domain-model.md adenda de Fase 8, que corrige por
- * completo el diseno original de la Fase 6). targetPosition,
- * triggeringPurchase y bonusPaidAt solo conservan el snapshot de la
- * evaluacion MAS RECIENTE -- el historial completo (pagado, parcial,
- * o perdido) vive en cashback_transactions y audit_logs. La logica de
- * resolucion vive en ReferralService, esta clase es solo el dato.
+ * Un registro por usuario referido. La comisión se evalúa y paga cada
+ * vez que el referido confirma una compra (Zenith 22%, Plus 25%).
+ * El historial completo vive en cashback_transactions.
  */
 @Entity
 @Table(name = "referrals")
@@ -46,15 +40,9 @@ public class Referral {
     @Column(name = "bonus_paid_at")
     private OffsetDateTime bonusPaidAt;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "target_position_id")
-    private InvestmentPosition targetPosition;
-
     /**
-     * La compra del REFERIDO que califico esta referral -- necesaria
-     * para saber, en el momento de pagar (que puede ser despues, si
-     * el referente recien se vuelve elegible), si la comision es 9%
-     * (Driver) o 40% (Zenith). Ver docs/domain-model.md 7.2.
+     * La compra del REFERIDO que calificó esta referral -- necesaria
+     * para saber si la comisión es 22% (Zenith) o 25% (Plus).
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "triggering_purchase_id")
@@ -80,63 +68,17 @@ public class Referral {
         }
     }
 
-    public UUID getId() {
-        return id;
-    }
-
-    public User getReferrer() {
-        return referrer;
-    }
-
-    public User getReferred() {
-        return referred;
-    }
-
-    public String getReferralCodeUsed() {
-        return referralCodeUsed;
-    }
-
-    public ReferralStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(ReferralStatus status) {
-        this.status = status;
-    }
-
-    public OffsetDateTime getQualifiedAt() {
-        return qualifiedAt;
-    }
-
-    public void setQualifiedAt(OffsetDateTime qualifiedAt) {
-        this.qualifiedAt = qualifiedAt;
-    }
-
-    public OffsetDateTime getBonusPaidAt() {
-        return bonusPaidAt;
-    }
-
-    public void setBonusPaidAt(OffsetDateTime bonusPaidAt) {
-        this.bonusPaidAt = bonusPaidAt;
-    }
-
-    public InvestmentPosition getTargetPosition() {
-        return targetPosition;
-    }
-
-    public void setTargetPosition(InvestmentPosition targetPosition) {
-        this.targetPosition = targetPosition;
-    }
-
-    public Purchase getTriggeringPurchase() {
-        return triggeringPurchase;
-    }
-
-    public void setTriggeringPurchase(Purchase triggeringPurchase) {
-        this.triggeringPurchase = triggeringPurchase;
-    }
-
-    public OffsetDateTime getCreatedAt() {
-        return createdAt;
-    }
+    public UUID getId() { return id; }
+    public User getReferrer() { return referrer; }
+    public User getReferred() { return referred; }
+    public String getReferralCodeUsed() { return referralCodeUsed; }
+    public ReferralStatus getStatus() { return status; }
+    public void setStatus(ReferralStatus status) { this.status = status; }
+    public OffsetDateTime getQualifiedAt() { return qualifiedAt; }
+    public void setQualifiedAt(OffsetDateTime qualifiedAt) { this.qualifiedAt = qualifiedAt; }
+    public OffsetDateTime getBonusPaidAt() { return bonusPaidAt; }
+    public void setBonusPaidAt(OffsetDateTime bonusPaidAt) { this.bonusPaidAt = bonusPaidAt; }
+    public Purchase getTriggeringPurchase() { return triggeringPurchase; }
+    public void setTriggeringPurchase(Purchase triggeringPurchase) { this.triggeringPurchase = triggeringPurchase; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

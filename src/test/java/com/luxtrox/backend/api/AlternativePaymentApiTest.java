@@ -82,7 +82,7 @@ class AlternativePaymentApiTest extends AbstractApiTest {
                 .header("Authorization", "Bearer " + userToken)
                 .contentType(ContentType.JSON)
                 .body("""
-                        {"planType": "DRIVER", "packageQuantity": 1, "paymentMethod": "ALTERNATIVE"}
+                        {"planType": "ZENITH", "paymentMethod": "ALTERNATIVE"}
                         """)
         .when()
                 .post("/purchases")

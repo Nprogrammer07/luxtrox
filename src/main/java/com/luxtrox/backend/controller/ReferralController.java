@@ -7,7 +7,6 @@ import com.luxtrox.backend.entity.Referral;
 import com.luxtrox.backend.entity.User;
 import com.luxtrox.backend.entity.enums.ReferralStatus;
 import com.luxtrox.backend.repository.CashbackTransactionRepository;
-import com.luxtrox.backend.repository.InvestmentPositionRepository;
 import com.luxtrox.backend.repository.ReferralRepository;
 import com.luxtrox.backend.repository.UserRepository;
 import com.luxtrox.backend.security.CustomUserPrincipal;
@@ -34,47 +33,54 @@ public class ReferralController {
     private final ReferralRepository referralRepository;
     private final CashbackTransactionRepository transactionRepository;
     private final UserRepository userRepository;
-    private final InvestmentPositionRepository positionRepository;
 
     public ReferralController(ReferralRepository referralRepository,
                                CashbackTransactionRepository transactionRepository,
-                               UserRepository userRepository,
-                               InvestmentPositionRepository positionRepository) {
+                               UserRepository userRepository) {
         this.referralRepository = referralRepository;
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
-        this.positionRepository = positionRepository;
     }
 
     @GetMapping("/my-code")
-    @Operation(summary = "Mi propio codigo de referido, para compartir")
-    public ResponseEntity<String> myReferralCode(@AuthenticationPrincipal CustomUserPrincipal principal) {
-        return ResponseEntity.ok(principal.getUser().getReferralCode());
+    @Operation(summary = "Devuelve el codigo de referido propio del usuario autenticado")
+    public String myReferralCode(@AuthenticationPrincipal CustomUserPrincipal principal) {
+        return principal.getUser().getReferralCode();
     }
 
+    /**
+     * activeReferrals = referidos en PENDING_PURCHASE (aun activos, no
+     * han comprado). totalBonusEarned = suma de todas las comisiones
+     * de referido recibidas. pendingBonus siempre 0 (ver
+     * ReferralSummaryResponse para el por que).
+     */
     @GetMapping("/summary")
-    @Operation(summary = "Resumen de mi actividad de referidos (totales, activos, comision ganada)")
+    @Transactional(readOnly = true)
+    @Operation(summary = "Resumen de referidos del usuario: codigo, totales y comisiones")
     public ReferralSummaryResponse summary(@AuthenticationPrincipal CustomUserPrincipal principal) {
         User user = principal.getUser();
-        long total = referralRepository.countByReferrer(user);
+
+        long total = 0;
+        long active = 0;
+        for (ReferralStatus status : ReferralStatus.values()) {
+            List<Referral> byStatus = referralRepository.findByReferrerAndStatus(user, status);
+            total += byStatus.size();
+            if (status == ReferralStatus.PENDING_PURCHASE) {
+                active += byStatus.size();
+            }
+        }
+
+        BigDecimal totalBonusEarned = transactionRepository.sumReferralBonusForUser(user);
+
         return new ReferralSummaryResponse(
                 user.getReferralCode(),
                 total,
-                // activeReferrals ahora = total de partners (PENDING_PURCHASE + RESOLVED)
-                // -- con las nuevas reglas las comisiones son por compra (repetibles),
-                // todos los referidos son "activos" sin importar su estado de Referral.
-                total,
-                transactionRepository.sumReferralBonusForUser(user),
+                active,
+                totalBonusEarned,
                 BigDecimal.ZERO
         );
     }
 
-    /**
-     * @Transactional aqui es necesario: CashbackTransaction.sourceReferral
-     * es FetchType.LAZY, y toBonusResponse() lo lee despues de que
-     * el repositorio ya devolvio. Mismo patron ya resuelto varias
-     * veces antes en este proyecto (ver myReferrals() mas abajo).
-     */
     @GetMapping("/bonuses")
     @Transactional(readOnly = true)
     @Operation(summary = "Historial de comisiones de referido ya pagadas")
@@ -98,32 +104,15 @@ public class ReferralController {
                 .orElseGet(() -> Map.of("valid", false));
     }
 
-    /**
-     * @Transactional aqui es necesario: referral.getReferred() es
-     * FetchType.LAZY, y toResponse() lo lee DESPUES de que
-     * referralRepository.findByReferrerAndStatus() ya devolvio (su
-     * propia transaccion, mas corta, ya cerro para ese punto). Sin
-     * esto, accederlo durante el mapeo tira LazyInitializationException
-     * -- el mismo patron que CustomUserPrincipal.getAuthorities()
-     * tenia con user.getRole() (ver ese comentario para el detalle
-     * completo), encontrado aqui al escribir el primer test que de
-     * verdad ejercitaba este endpoint.
-     */
     @GetMapping
     @Transactional(readOnly = true)
     @Operation(summary = "Personas que he referido, y el estado de cada comision")
     public ResponseEntity<List<ReferralResponse>> myReferrals(
             @AuthenticationPrincipal CustomUserPrincipal principal) {
-
-        // findByReferrerAndStatus exige un status -- como aqui se
-        // quiere el historial completo sin filtrar, se consulta cada
-        // estado posible y se combina, en vez de agregar un metodo
-        // "findByReferrer" nuevo solo para este unico uso.
         List<Referral> all = Arrays.stream(ReferralStatus.values())
                 .flatMap(status -> referralRepository
                         .findByReferrerAndStatus(principal.getUser(), status).stream())
                 .toList();
-
         List<ReferralResponse> response = all.stream().map(this::toResponse).toList();
         return ResponseEntity.ok(response);
     }
@@ -137,7 +126,7 @@ public class ReferralController {
                 referred.getEmail(),
                 transactionRepository.sumAmountBySourceReferral(referral),
                 referral.getStatus(),
-                positionRepository.countByUser(referred),
+                0L,
                 referral.getQualifiedAt(),
                 referral.getBonusPaidAt()
         );

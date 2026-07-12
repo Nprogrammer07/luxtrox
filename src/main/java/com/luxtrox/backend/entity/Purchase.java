@@ -9,16 +9,9 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
- * Una compra DRIVER siempre genera UNA sola posicion sin importar
- * cuantos paquetes contenga (ver docs/domain-model.md 2.3). Una
- * compra ZENITH NUNCA genera posicion -- genera una ZenithLicense en
- * su lugar (ver docs/domain-model.md 7.1, adenda de Fase 6).
- *
- * La relacion con InvestmentPosition es 1:1 con columnas FK fisicas en
- * AMBOS lados (purchases.position_id y investment_positions.purchase_id)
- * -- asi se diseno deliberadamente en las migraciones de Fase 3, por
- * eso aqui son dos asociaciones @OneToOne independientes, no una sola
- * con mappedBy.
+ * Una compra ZENITH genera una ZenithLicense; una compra PLUS genera
+ * una PlusLicense. Ninguna genera posiciones (el módulo Driver fue
+ * eliminado).
  */
 @Entity
 @Table(name = "purchases")
@@ -51,17 +44,13 @@ public class Purchase {
     @Column(name = "status", nullable = false, length = 20)
     private PurchaseStatus status = PurchaseStatus.PENDING;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "position_id")
-    private InvestmentPosition position;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
     @Column(name = "confirmed_at")
     private OffsetDateTime confirmedAt;
 
-    /** Solo se llena para compras CRYPTO -- referencia al invoice creado en NOWPayments (Fase 7). */
+    /** Solo se llena para compras CRYPTO -- referencia al invoice de NOWPayments. */
     @Column(name = "nowpayments_invoice_id", length = 100)
     private String nowpaymentsInvoiceId;
 
@@ -85,63 +74,17 @@ public class Purchase {
         }
     }
 
-    public UUID getId() {
-        return id;
-    }
-
-    public User getUser() {
-        return user;
-    }
-
-    public PlanType getPlanType() {
-        return planType;
-    }
-
-    public Integer getPackageQuantity() {
-        return packageQuantity;
-    }
-
-    public BigDecimal getTotalAmount() {
-        return totalAmount;
-    }
-
-    public PaymentMethod getPaymentMethod() {
-        return paymentMethod;
-    }
-
-    public PurchaseStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(PurchaseStatus status) {
-        this.status = status;
-    }
-
-    public InvestmentPosition getPosition() {
-        return position;
-    }
-
-    public void setPosition(InvestmentPosition position) {
-        this.position = position;
-    }
-
-    public OffsetDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public OffsetDateTime getConfirmedAt() {
-        return confirmedAt;
-    }
-
-    public void setConfirmedAt(OffsetDateTime confirmedAt) {
-        this.confirmedAt = confirmedAt;
-    }
-
-    public String getNowpaymentsInvoiceId() {
-        return nowpaymentsInvoiceId;
-    }
-
-    public void setNowpaymentsInvoiceId(String nowpaymentsInvoiceId) {
-        this.nowpaymentsInvoiceId = nowpaymentsInvoiceId;
-    }
+    public UUID getId() { return id; }
+    public User getUser() { return user; }
+    public PlanType getPlanType() { return planType; }
+    public Integer getPackageQuantity() { return packageQuantity; }
+    public BigDecimal getTotalAmount() { return totalAmount; }
+    public PaymentMethod getPaymentMethod() { return paymentMethod; }
+    public PurchaseStatus getStatus() { return status; }
+    public void setStatus(PurchaseStatus status) { this.status = status; }
+    public OffsetDateTime getCreatedAt() { return createdAt; }
+    public OffsetDateTime getConfirmedAt() { return confirmedAt; }
+    public void setConfirmedAt(OffsetDateTime confirmedAt) { this.confirmedAt = confirmedAt; }
+    public String getNowpaymentsInvoiceId() { return nowpaymentsInvoiceId; }
+    public void setNowpaymentsInvoiceId(String id) { this.nowpaymentsInvoiceId = id; }
 }

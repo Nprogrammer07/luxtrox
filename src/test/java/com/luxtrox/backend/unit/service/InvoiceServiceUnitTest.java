@@ -72,7 +72,7 @@ class InvoiceServiceUnitTest {
     }
 
     private Purchase confirmedPurchase() {
-        Purchase purchase = new Purchase(user, PlanType.DRIVER, 2, new BigDecimal("2198.00"), PaymentMethod.CRYPTO);
+        Purchase purchase = new Purchase(user, PlanType.ZENITH, 2, new BigDecimal("2198.00"), PaymentMethod.CRYPTO);
         setId(purchase, UUID.randomUUID());
         // createdAt solo se llena via @PrePersist -- sin persistir de
         // verdad hay que setearlo a mano, igual que el id.
