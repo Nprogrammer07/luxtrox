@@ -12,6 +12,10 @@ public interface PlusLicenseRepository extends JpaRepository<PlusLicense, UUID> 
 
     List<PlusLicense> findByUserOrderByPurchasedAtDesc(User user);
 
+    List<PlusLicense> findByUser(User user);
+
+    List<PlusLicense> findByStatus(PlusLicenseStatus status);
+
     boolean existsByUserAndStatus(User user, PlusLicenseStatus status);
 
     long countByStatus(PlusLicenseStatus status);

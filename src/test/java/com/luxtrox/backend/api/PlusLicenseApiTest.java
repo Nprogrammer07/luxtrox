@@ -98,7 +98,7 @@ class PlusLicenseApiTest extends AbstractApiTest {
                 .then().statusCode(200)
                 .body("$", hasSize(1))
                 .body("[0].status", equalTo("active"))
-                .body("[0].expiresAt", notNullValue());
+                .body("[0].currentPeriodEnd", notNullValue());
     }
 
     @Test
