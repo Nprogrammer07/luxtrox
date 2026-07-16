@@ -25,7 +25,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Comisiones de referido -- planes Zenith (22%) y Plus (25% = $50 flat).
+ * Comisiones de referido:
+ *  - Zenith = 22% del precio de la compra.
+ *  - Genius (PLUS) = $19 FIJOS (monto fijo, no porcentaje).
  * Sin restricciones de plan: cualquier persona con codigo de referido
  * recibe comision por CADA compra confirmada del referido.
  */
@@ -88,9 +90,10 @@ class ReferralServiceUnitTest {
     }
 
     @Test
-    void calculateCommission_plus_isTwentyFivePercent() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
-        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("50.00");
+    void calculateCommission_plus_isFlatNineteen() {
+        // Genius paga $19 fijos, sin importar el precio de la compra.
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("89.00"));
+        assertThat(service.calculateCommission(purchase)).isEqualByComparingTo("19.00");
     }
 
     // ---------- sin referente ----------
@@ -112,8 +115,8 @@ class ReferralServiceUnitTest {
     // ---------- Commission directa ----------
 
     @Test
-    void plusPurchase_referrerWithNoPlan_stillReceivesFiftyUsd() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00")); // 50.00
+    void plusPurchase_referrerWithNoPlan_stillReceivesNineteenUsd() {
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("89.00")); // $19 fijo
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));
@@ -122,17 +125,17 @@ class ReferralServiceUnitTest {
 
         ArgumentCaptor<CashbackTransaction> txCaptor = ArgumentCaptor.forClass(CashbackTransaction.class);
         verify(cashbackTransactionRepository).save(txCaptor.capture());
-        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("50.00");
+        assertThat(txCaptor.getValue().getAmount()).isEqualByComparingTo("19.00");
         assertThat(txCaptor.getValue().getType()).isEqualTo(CashbackTransactionType.REFERRAL_BONUS_DIRECT);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(userCaptor.capture());
-        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("50.00");
+        assertThat(userCaptor.getValue().getAvailableBalance()).isEqualByComparingTo("19.00");
 
-        verify(notificationEmailService).sendReferralBonusReceivedEmail(referrer, new BigDecimal("50.00"));
+        verify(notificationEmailService).sendReferralBonusReceivedEmail(referrer, new BigDecimal("19.00"));
 
         assertThat(meterRegistry.get("luxtrox.referral.commission.paid")
-                .tag("planType", "PLUS").counter().count()).isEqualTo(50.00);
+                .tag("planType", "PLUS").counter().count()).isEqualTo(19.00);
     }
 
     @Test
@@ -161,7 +164,7 @@ class ReferralServiceUnitTest {
 
     @Test
     void firstPurchase_referralMovesToResolved() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("89.00"));
         Referral referral = newReferral();
         assertThat(referral.getStatus()).isEqualTo(ReferralStatus.PENDING_PURCHASE);
 
@@ -176,7 +179,7 @@ class ReferralServiceUnitTest {
 
     @Test
     void secondPurchaseFromSameReferredPerson_referralAlreadyResolved_stillPaysCommission() {
-        Purchase secondPurchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
+        Purchase secondPurchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("89.00"));
         Referral alreadyResolved = newReferral();
         alreadyResolved.setStatus(ReferralStatus.RESOLVED);
 
@@ -195,7 +198,7 @@ class ReferralServiceUnitTest {
 
     @Test
     void emailFailure_stillCompletesThePaymentAndAudits() {
-        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("200.00"));
+        Purchase purchase = confirmedPurchase(referred, PlanType.PLUS, new BigDecimal("89.00"));
         Referral referral = newReferral();
 
         when(referralRepository.findByReferred(referred)).thenReturn(Optional.of(referral));

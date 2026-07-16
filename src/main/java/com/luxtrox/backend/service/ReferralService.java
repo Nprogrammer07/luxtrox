@@ -17,10 +17,15 @@ import java.util.Optional;
 
 /**
  * Comisiones de referido. Sin requisito de plan propio: cualquier
- * usuario con código de referido cobra comisión por CADA compra
- * confirmada de su referido, y por cada RENOVACIÓN anual de Genius.
+ * usuario con código de referido cobra comisión por cada compra
+ * confirmada de su referido.
  *
- * Zenith = 22% de la compra. Genius (PLUS) = 25% = $50 flat.
+ * Zenith  = 22% del precio de la compra.
+ * Genius (PLUS) = $19 FIJOS (monto fijo, no un porcentaje).
+ *
+ * Genius es pago único, así que no genera comisiones por renovación.
+ * El método onRenewalConfirmed() queda latente por si en el futuro se
+ * reactiva algún esquema de renovación con comisión.
  */
 @Service
 public class ReferralService {
@@ -46,18 +51,18 @@ public class ReferralService {
         this.meterRegistry = meterRegistry;
     }
 
-    /** Tasa de comisión según el plan: Zenith 22%, Genius 25%. */
-    private BigDecimal rateFor(PlanType plan) {
-        return switch (plan) {
-            case ZENITH -> PlanPricing.ZENITH_REFERRAL_RATE;
-            case PLUS   -> PlanPricing.PLUS_REFERRAL_RATE;
-        };
-    }
-
+    /**
+     * Comisión de una compra según el plan:
+     *  - Zenith: 22% del monto de la compra.
+     *  - Genius (PLUS): $19 fijos, sin importar el monto.
+     */
     public BigDecimal calculateCommission(Purchase referredPurchase) {
-        return referredPurchase.getTotalAmount()
-                .multiply(rateFor(referredPurchase.getPlanType()))
-                .setScale(2, RoundingMode.HALF_UP);
+        return switch (referredPurchase.getPlanType()) {
+            case ZENITH -> referredPurchase.getTotalAmount()
+                    .multiply(PlanPricing.ZENITH_REFERRAL_RATE)
+                    .setScale(2, RoundingMode.HALF_UP);
+            case PLUS -> PlanPricing.PLUS_REFERRAL_FLAT;
+        };
     }
 
     /** Comisión por una COMPRA confirmada del referido. */
@@ -69,22 +74,25 @@ public class ReferralService {
     }
 
     /**
-     * Comisión por una RENOVACIÓN anual del referido (Genius $200 → $50).
-     * A diferencia de una compra, aquí no hay Purchase: el monto y el plan
-     * llegan directo desde PlusService.renew().
+     * LATENTE -- hoy sin uso. Genius es pago único y no genera comisión
+     * por renovación. Se conserva por si se reactiva un esquema de
+     * renovación con comisión en el futuro. Para Genius usaría el monto
+     * fijo; para cualquier otro plan, la tasa correspondiente.
      */
     @Transactional
     public void onRenewalConfirmed(User renewingUser, PlanType plan, BigDecimal renewalAmount) {
-        BigDecimal commission = renewalAmount
-                .multiply(rateFor(plan))
-                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal commission = switch (plan) {
+            case ZENITH -> renewalAmount.multiply(PlanPricing.ZENITH_REFERRAL_RATE)
+                    .setScale(2, RoundingMode.HALF_UP);
+            case PLUS -> PlanPricing.PLUS_REFERRAL_FLAT;
+        };
         payCommission(renewingUser, plan, commission, null);
     }
 
     /**
      * Núcleo del pago: acredita la comisión al referente del usuario que
-     * compró/renovó. Si el usuario no tiene referente, no hace nada.
-     * triggeringPurchase puede ser null (caso renovación).
+     * compró. Si el usuario no tiene referente, no hace nada.
+     * triggeringPurchase puede ser null.
      */
     private void payCommission(User buyer, PlanType plan, BigDecimal commission,
                                 Purchase triggeringPurchase) {

@@ -12,13 +12,12 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Tests de integración para el plan Luxtrox Plus.
- * Cubre: compra, confirmación, listado de licencias,
- * comisión de referido ($50) y descuento Zenith ($100).
+ * Tests de integración para el plan Luxtrox Genius (interno: PLUS).
+ * Cubre: compra ($89 pago único), confirmación, listado de licencias,
+ * comisión de referido ($19 fijos) y descuento Zenith ($100).
  *
  * Para obtener un token admin: registrar usuario normal → promover
  * vía repositorio → re-login (el JWT nuevo ya lleva el rol ADMIN).
- * No existe loginAdmin() en AbstractApiTest.
  */
 class PlusLicenseApiTest extends AbstractApiTest {
 
@@ -102,7 +101,7 @@ class PlusLicenseApiTest extends AbstractApiTest {
     }
 
     @Test
-    void plusPurchase_price_is200() {
+    void plusPurchase_price_is89() {
         String adminToken = registerAdmin();
         String token = register("plus-price" + uniqueSuffix() + "@example.com");
         String purchaseId = createPlusPurchase(token);
@@ -111,7 +110,7 @@ class PlusLicenseApiTest extends AbstractApiTest {
                 .when().get("/admin/purchases/requests")
                 .then().statusCode(200)
                 .body("find { it.id == '" + purchaseId + "' }.totalAmount",
-                        equalTo(200.0f));
+                        equalTo(89.0f));
     }
 
     @Test
@@ -159,7 +158,7 @@ class PlusLicenseApiTest extends AbstractApiTest {
     }
 
     @Test
-    void plusReferral_referrerReceives50Usd() {
+    void plusReferral_referrerReceives19Usd() {
         String adminToken = registerAdmin();
 
         String referrerEmail = "plus-ref" + uniqueSuffix() + "@example.com";
@@ -191,6 +190,6 @@ class PlusLicenseApiTest extends AbstractApiTest {
         given().header("Authorization", "Bearer " + referrerToken)
                 .when().get("/cashback/summary")
                 .then().statusCode(200)
-                .body("available", equalTo(50.0f));
+                .body("available", equalTo(19.0f));
     }
 }
